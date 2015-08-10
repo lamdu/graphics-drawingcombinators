@@ -71,7 +71,8 @@ module Graphics.DrawingCombinators
     -- * Sprites (images from files)
     , Sprite, openSprite, sprite
     -- * Text
-    , Font, openFont, text, textWidth, withFont
+    , Font, openFont, withFont
+    , text, textWidth, textBoundingWidth, textAdvance
     -- * Extensions
     , unsafeOpenGLImage
     , Monoid(..), Any(..)
@@ -361,6 +362,10 @@ text font str = Image render' pick
 textHeight :: R
 textHeight = 2
 
+{-# DEPRECATED textWidth "Use textBoundingWidth or textAdvance instead" #-}
+textWidth :: Font -> String -> R
+textWidth font str = max (textAdvance font str) (textBoundingWidth font str)
+
 #ifdef LAME_FONTS
 
 data Font = Font
@@ -379,8 +384,14 @@ renderText Font str = do
     GL.scale (1/72 :: GL.GLdouble) (1/72) 1
     GLUT.renderString GLUT.Roman str
 
-textWidth :: Font -> String -> R
-textWidth Font str = (1/72) * fromIntegral (unsafePerformIO (GLUT.stringWidth GLUT.Roman str))
+glutTextWidth :: Font -> String -> R
+glutTextWidth Font str = (1/72) * fromIntegral (unsafePerformIO (GLUT.stringWidth GLUT.Roman str))
+
+textBoundingWidth :: Font -> String -> R
+textBoundingWidth = glutTextWidth
+
+textAdvance :: Font -> String -> R
+textAdvance = glutTextWidth
 
 #else
 
@@ -415,10 +426,17 @@ withFont path act =
         act (Font font)
 
 -- | @textWidth font str@ is the width of the text in @text font str@.
-textWidth :: Font -> String -> R
-textWidth font str =
-  (* (textHeight / fontSize)) . realToFrac . unsafePerformIO $
-  FTGL.getFontAdvance (getFont font) str
+textBoundingWidth :: Font -> String -> R
+textBoundingWidth font str =
+    (* (textHeight / fontSize)) . realToFrac $ urx + llx
+    where
+        [llx, _lly, _llz, urx, _ury, _urz] =
+            unsafePerformIO $ FTGL.getFontBBox (getFont font) str
+
+textAdvance :: Font -> String -> R
+textAdvance font str =
+    (* (textHeight / fontSize)) . realToFrac $ unsafePerformIO $
+    FTGL.getFontAdvance (getFont font) str
 
 #endif
 

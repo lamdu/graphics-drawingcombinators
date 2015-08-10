@@ -43,7 +43,7 @@ unitText font str =
     ]
     where
         s = 2 / w
-        w = Draw.textWidth font str
+        w = Draw.textBoundingWidth font str
 
 quadrants :: (Monoid a) => Draw.Image a -> Draw.Image a
 quadrants img = mconcat [
