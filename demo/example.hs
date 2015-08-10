@@ -42,7 +42,7 @@ unitText font str =
       square
     ]
     where
-        w = Draw.textWidth font str
+        w = Draw.textBoundingWidth font str
 
 quadrants :: (Monoid a) => Draw.Image a -> Draw.Image a
 quadrants img = mconcat [
