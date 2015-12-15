@@ -71,7 +71,7 @@ module Graphics.DrawingCombinators
     -- * Sprites (images from files)
     , Sprite, openSprite, sprite
     -- * Text
-    , Font, openFont, withFont
+    , Font, openFont, withFont, withFontCatch
     , text, textWidth, textBoundingWidth, textAdvance
     -- * Extensions
     , unsafeOpenGLImage
@@ -81,6 +81,8 @@ where
 
 import Graphics.DrawingCombinators.Affine
 import Control.Applicative (Applicative(..), liftA2, (<$>))
+import qualified Control.Exception as Exception
+import Control.Exception (Exception)
 import Data.Monoid (Monoid(..), Any(..))
 import qualified Data.Bitmap.OpenGL as Bitmap
 import qualified Graphics.Rendering.OpenGL.GL as GL
@@ -91,7 +93,6 @@ import System.IO.Unsafe (unsafePerformIO)  -- for pure textWidth
 import qualified Graphics.UI.GLUT as GLUT
 import Control.Monad (unless)
 #else
-import qualified Control.Exception as Exception
 import qualified Graphics.Rendering.FTGL as FTGL
 import System.Mem.Weak (addFinalizer)
 #endif
@@ -367,6 +368,12 @@ textWidth font str = max (textAdvance font str) (textBoundingWidth font str)
 
 data Font = Font
 
+withFontCatch :: Exception e => (e -> IO a) -> FilePath -> (Font -> IO a) -> IO a
+withFontCatch openFontError path act =
+    (Right <$> openFont path)
+    `Exception.catch` (fmap Left . openFontError)
+    >>= either return act
+
 withFont :: FilePath -> (Font -> IO a) -> IO a
 withFont path act = openFont path >>= act
 
@@ -413,12 +420,20 @@ openFont path = do
     _ <- FTGL.setFontFaceSize font 72 72
     return $ Font font
 
-withFont :: FilePath -> (Font -> IO a) -> IO a
-withFont path act =
-    Exception.bracket (FTGL.createBufferFont path) FTGL.destroyFont $
-    \font -> do
+withFontCatch :: Exception e => (e -> IO a) -> FilePath -> (Font -> IO a) -> IO a
+withFontCatch openFontError path act =
+    Exception.bracket
+    ((Right <$> FTGL.createBufferFont path) `Exception.catch` (fmap Left . openFontError))
+    (either (const (return ())) FTGL.destroyFont) $
+    \eFont ->
+    case eFont of
+    Left res -> return res
+    Right font -> do
         _ <- FTGL.setFontFaceSize font 72 72
         act (Font font)
+
+withFont :: FilePath -> (Font -> IO a) -> IO a
+withFont = withFontCatch (Exception.throwIO :: Exception.SomeException -> IO a)
 
 -- | @textWidth font str@ is the width of the text in @text font str@.
 textBoundingWidth :: Font -> String -> R
