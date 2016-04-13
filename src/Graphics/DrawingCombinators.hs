@@ -71,8 +71,8 @@ module Graphics.DrawingCombinators
     -- * Sprites (images from files)
     , Sprite, openSprite, sprite
     -- * Text
-    , Font, openFont, withFont, withFontCatch
-    , text, textWidth, textBoundingWidth, textAdvance
+    , Font, openFont, withFont, withFontCatch, fontDescender, fontAscender
+    , text, textHeight, textWidth, textBoundingWidth, textAdvance
     -- * Extensions
     , unsafeOpenGLImage
     , Monoid(..), Any(..)
@@ -388,6 +388,12 @@ openFont _ = do
     unless inited $ GLUT.initialize "" [] >> return ()
     return Font
 
+fontDescender :: Font -> R
+fontDescender Font = -0.5
+
+fontAscender :: Font -> R
+fontAscender Font = 1.5
+
 renderText :: Font -> String -> IO ()
 renderText Font str = do
     GL.scale (1/64 :: GL.GLdouble) (1/64) 1
@@ -413,6 +419,12 @@ renderText :: Font -> String -> IO ()
 renderText font str = do
     GL.scale (realToFrac (textHeight/fontSize) :: GL.GLdouble) (1/36) 1
     FTGL.renderFont (getFont font) str FTGL.All
+
+fontDescender :: Font -> R
+fontDescender = (* (textHeight / fontSize)) . realToFrac . FTGL.getFontDescender . getFont
+
+fontAscender :: Font -> R
+fontAscender = (* (textHeight / fontSize)) . realToFrac . FTGL.getFontAscender . getFont
 
 -- | Load a TTF font from a file.
 --
