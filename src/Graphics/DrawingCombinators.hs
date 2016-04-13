@@ -358,6 +358,9 @@ text font str = Image render' pick
       | 0 <= x && x <= textWidth font str && -0.5 <= y && y <= 1.5 = Any True
       | otherwise                                             = Any False
 
+textHeight :: R
+textHeight = 2
+
 #ifdef LAME_FONTS
 
 data Font = Font
@@ -383,9 +386,12 @@ textWidth Font str = (1/72) * fromIntegral (unsafePerformIO (GLUT.stringWidth GL
 
 data Font = Font { getFont :: FTGL.Font }
 
+fontSize :: R
+fontSize = 72
+
 renderText :: Font -> String -> IO ()
 renderText font str = do
-    GL.scale (1/36 :: GL.GLdouble) (1/36) 1
+    GL.scale (realToFrac (textHeight/fontSize) :: GL.GLdouble) (1 * (textHeight / fontSize)) 1
     FTGL.renderFont (getFont font) str FTGL.All
 
 -- | Load a TTF font from a file.
@@ -411,7 +417,7 @@ withFont path act =
 -- | @textWidth font str@ is the width of the text in @text font str@.
 textWidth :: Font -> String -> R
 textWidth font str =
-  (/36) . realToFrac . unsafePerformIO $
+  (* (textHeight / fontSize)) . realToFrac . unsafePerformIO $
   FTGL.getFontAdvance (getFont font) str
 
 #endif
