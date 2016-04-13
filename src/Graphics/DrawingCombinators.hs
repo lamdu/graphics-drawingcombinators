@@ -396,11 +396,11 @@ fontAscender Font = 1.5
 
 renderText :: Font -> String -> IO ()
 renderText Font str = do
-    GL.scale (1/64 :: GL.GLdouble) (1/64) 1
+    GL.scale (1/72 :: GL.GLdouble) (1/72) 1
     GLUT.renderString GLUT.Roman str
 
 glutTextWidth :: Font -> String -> R
-glutTextWidth Font str = (1/64) * fromIntegral (unsafePerformIO (GLUT.stringWidth GLUT.Roman str))
+glutTextWidth Font str = (1/72) * fromIntegral (unsafePerformIO (GLUT.stringWidth GLUT.Roman str))
 
 textBoundingWidth :: Font -> String -> R
 textBoundingWidth = glutTextWidth
