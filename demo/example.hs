@@ -81,8 +81,7 @@ main = do
             pic <- Draw.openSprite picName
             return (fontName, Draw.sprite pic)
         _ -> error "Usage: drawingcombinators-example some_font.ttf some_img.png"
-    Draw.withFont fontName $ \font -> do
-
+    Draw.withFont 72 fontName $ \font -> do
         doneRef <- newIORef False
         GLFW.setWindowCloseCallback win $ Just $ const $ writeIORef doneRef True
 

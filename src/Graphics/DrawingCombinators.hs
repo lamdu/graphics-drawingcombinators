@@ -71,8 +71,8 @@ module Graphics.DrawingCombinators
     -- * Sprites (images from files)
     , Sprite, openSprite, sprite
     -- * Text
-    , Font, withFont, withFontCatch, fontDescender, fontAscender
-    , text, textHeight, textBoundingWidth, textAdvance
+    , Font, withFont, withFontCatch, fontDescender, fontAscender, fontHeight
+    , text, textBoundingWidth, textAdvance
     -- * Extensions
     , unsafeOpenGLImage
     , Monoid(..), Any(..)
@@ -80,7 +80,7 @@ module Graphics.DrawingCombinators
 where
 
 import Graphics.DrawingCombinators.Affine
-import Control.Applicative (Applicative(..), liftA2, (<$>))
+import Control.Applicative (Applicative(..), liftA2, (<$>), (<$))
 import qualified Control.Exception as Exception
 import Control.Exception (Exception)
 import Data.Monoid (Monoid(..), Any(..))
@@ -359,35 +359,44 @@ text font str = Image render' pick
       | 0 <= x && x <= textBoundingWidth font str && -0.5 <= y && y <= 1.5 = Any True
       | otherwise                                             = Any False
 
-textHeight :: R
-textHeight = 2
+withFont :: Int -> FilePath -> (Font -> IO a) -> IO a
+withFont = withFontCatch (Exception.throwIO :: Exception.SomeException -> IO a)
 
 #ifdef LAME_FONTS
 
-data Font = Font
+data Font = Font !Int
 
-withFontCatch :: Exception e => (e -> IO a) -> FilePath -> (Font -> IO a) -> IO a
-withFontCatch openFontError path act =
-    (Right <$> openFont path)
-    `Exception.catch` (fmap Left . openFontError)
-    >>= either return act
+initGLUT :: IO ()
+initGLUT = do
+    inited <- GLUT.get GLUT.initState
+    unless inited (() <$ GLUT.initialize "" [])
 
-withFont :: FilePath -> (Font -> IO a) -> IO a
-withFont path act = openFont path >>= act
+withFontCatch :: Exception e => (e -> IO a) -> Int -> FilePath -> (Font -> IO a) -> IO a
+withFontCatch openFontError size path act =
+    (Nothing <$ initGLUT)
+    `Exception.catch` (fmap Just . openFontError)
+    >>= maybe (act (Font size)) return
+
+fontHeight :: Font -> R
+fontHeight (Font size) = 2 * fromIntegral size
 
 fontDescender :: Font -> R
-fontDescender Font = -0.5
+fontDescender (Font size) = -0.5 * fromIntegral size
 
 fontAscender :: Font -> R
-fontAscender Font = 1.5
+fontAscender (Font size) = 1.5 * fromIntegral size
 
 renderText :: Font -> String -> IO ()
-renderText Font str = do
-    GL.scale (1/72 :: GL.GLdouble) (1/72) 1
+renderText (Font size) str = do
+    GL.scale s s 1
     GLUT.renderString GLUT.Roman str
+    where
+        s :: GL.GLdouble
+        s = fromIntegral size / 72
 
 glutTextWidth :: Font -> String -> R
-glutTextWidth Font str = (1/72) * fromIntegral (unsafePerformIO (GLUT.stringWidth GLUT.Roman str))
+glutTextWidth (Font size) str =
+    fromIntegral size / 72 * fromIntegral (unsafePerformIO (GLUT.stringWidth GLUT.Roman str))
 
 textBoundingWidth :: Font -> String -> R
 textBoundingWidth = glutTextWidth
@@ -397,24 +406,26 @@ textAdvance = glutTextWidth
 
 #else
 
-data Font = Font { getFont :: FTGL.Font }
+data Font = Font
+    { _getFontSize :: !Int
+    , getFont :: !FTGL.Font
+    }
 
-fontSize :: R
-fontSize = 72
+fontHeight :: Font -> R
+fontHeight (Font size _) = fromIntegral size
 
 renderText :: Font -> String -> IO ()
-renderText font str = do
-    GL.scale (realToFrac (textHeight/fontSize) :: GL.GLdouble) (1/36) 1
-    FTGL.renderFont (getFont font) str FTGL.All
+renderText (Font _ font) str = FTGL.renderFont font str FTGL.All
 
 fontDescender :: Font -> R
-fontDescender = (* (textHeight / fontSize)) . realToFrac . FTGL.getFontDescender . getFont
+fontDescender = realToFrac . FTGL.getFontDescender . getFont
 
 fontAscender :: Font -> R
-fontAscender = (* (textHeight / fontSize)) . realToFrac . FTGL.getFontAscender . getFont
+fontAscender = realToFrac . FTGL.getFontAscender . getFont
 
-withFontCatch :: Exception e => (e -> IO a) -> FilePath -> (Font -> IO a) -> IO a
-withFontCatch openFontError path act =
+-- | Load a TTF font from a file. This is CPS'd to take care of finalization
+withFontCatch :: Exception e => (e -> IO a) -> Int -> FilePath -> (Font -> IO a) -> IO a
+withFontCatch openFontError size path act =
     Exception.bracket
     ((Right <$> FTGL.createBufferFont path) `Exception.catch` (fmap Left . openFontError))
     (either (const (return ())) FTGL.destroyFont) $
@@ -422,24 +433,20 @@ withFontCatch openFontError path act =
     case eFont of
     Left res -> return res
     Right font -> do
-        _ <- FTGL.setFontFaceSize font 72 72
-        act (Font font)
-
-withFont :: FilePath -> (Font -> IO a) -> IO a
-withFont = withFontCatch (Exception.throwIO :: Exception.SomeException -> IO a)
+        _ <- FTGL.setFontFaceSize font size 72
+        act (Font size font)
 
 -- | @textBoundingWidth font str@ is the width of the text in @text font str@.
 textBoundingWidth :: Font -> String -> R
 textBoundingWidth font str =
-    (* (textHeight / fontSize)) . realToFrac $ urx + llx
+    realToFrac $ urx + llx
     where
         [llx, _lly, _llz, urx, _ury, _urz] =
             unsafePerformIO $ FTGL.getFontBBox (getFont font) str
 
 textAdvance :: Font -> String -> R
 textAdvance font str =
-    (* (textHeight / fontSize)) . realToFrac $ unsafePerformIO $
-    FTGL.getFontAdvance (getFont font) str
+    realToFrac $ unsafePerformIO $ FTGL.getFontAdvance (getFont font) str
 
 #endif
 
