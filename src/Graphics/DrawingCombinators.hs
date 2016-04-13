@@ -364,6 +364,9 @@ text font str = Image render' pick
 textWidth :: Font -> String -> R
 textWidth font str = max (textAdvance font str) (textBoundingWidth font str)
 
+textHeight :: R
+textHeight = 2
+
 #ifdef LAME_FONTS
 
 data Font = Font
@@ -403,9 +406,12 @@ textAdvance = glutTextWidth
 
 data Font = Font { getFont :: FTGL.Font }
 
+fontSize :: R
+fontSize = 72
+
 renderText :: Font -> String -> IO ()
 renderText font str = do
-    GL.scale (1/36 :: GL.GLdouble) (1/36) 1
+    GL.scale (realToFrac (textHeight/fontSize) :: GL.GLdouble) (1/36) 1
     FTGL.renderFont (getFont font) str FTGL.All
 
 -- | Load a TTF font from a file.
@@ -438,14 +444,14 @@ withFont = withFontCatch (Exception.throwIO :: Exception.SomeException -> IO a)
 -- | @textWidth font str@ is the width of the text in @text font str@.
 textBoundingWidth :: Font -> String -> R
 textBoundingWidth font str =
-    (/36) . realToFrac $ urx + llx
+    (* (textHeight / fontSize)) . realToFrac $ urx + llx
     where
         [llx, _lly, _llz, urx, _ury, _urz] =
             unsafePerformIO $ FTGL.getFontBBox (getFont font) str
 
 textAdvance :: Font -> String -> R
 textAdvance font str =
-    (/36) . realToFrac $ unsafePerformIO $
+    (* (textHeight / fontSize)) . realToFrac $ unsafePerformIO $
     FTGL.getFontAdvance (getFont font) str
 
 #endif
