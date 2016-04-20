@@ -1,5 +1,3 @@
-{-# LANGUAGE CPP #-}
-
 --------------------------------------------------------------
 -- |
 -- Module      : Graphics.DrawingCombinators
@@ -58,8 +56,7 @@
 --------------------------------------------------------------
 
 module Graphics.DrawingCombinators
-    (
-      module Graphics.DrawingCombinators.Affine
+    ( module Graphics.DrawingCombinators.Affine
     -- * Basic types
     , Image, render, clearRender
     -- * Selection
@@ -67,34 +64,31 @@ module Graphics.DrawingCombinators
     -- * Geometry
     , point, line, regularPoly, circle, convexPoly, (%%), bezierCurve
     -- * Colors
-    , Color(..), modulate, tint
+    , module Graphics.DrawingCombinators.Color
+    , tint
     -- * Sprites (images from files)
     , Sprite, openSprite, sprite
     -- * Text
-    , Font, withFont, withFontCatch, fontDescender, fontAscender, fontHeight
-    , text, textBoundingWidth, textAdvance
+    , Font, withFont, withFontCatch
+    , fontDescender, fontAscender, fontHeight
+    , TextAttrs(..), defTextAttrs
+    , text
+    , BoundingBox(..), textBoundingBox, textBoundingWidth
+    , textAdvance
     -- * Extensions
     , unsafeOpenGLImage
     , Monoid(..), Any(..)
     )
 where
 
-import Graphics.DrawingCombinators.Affine
-import Control.Applicative (Applicative(..), liftA2, (<$>), (<$))
-import qualified Control.Exception as Exception
-import Control.Exception (Exception)
-import Data.Monoid (Monoid(..), Any(..))
-import qualified Data.Bitmap.OpenGL as Bitmap
-import qualified Graphics.Rendering.OpenGL.GL as GL
 import qualified Codec.Image.STB as Image
-import System.IO.Unsafe (unsafePerformIO)  -- for pure text metrics
-
-#ifdef LAME_FONTS
-import qualified Graphics.UI.GLUT as GLUT
-import Control.Monad (unless)
-#else
-import qualified Graphics.Rendering.FTGL as FTGL
-#endif
+import           Control.Applicative (Applicative(..), liftA2, (<$>), (<$))
+import qualified Data.Bitmap.OpenGL as Bitmap
+import           Data.Monoid (Monoid(..), Any(..))
+import           Graphics.DrawingCombinators.Affine
+import           Graphics.DrawingCombinators.Color
+import           Graphics.DrawingCombinators.Text
+import qualified Graphics.Rendering.OpenGL.GL as GL
 
 type Renderer = Affine -> Color -> IO ()
 type Picker a = R2 -> a
@@ -108,24 +102,28 @@ type Picker a = R2 -> a
 -- described below.
 data Image a = Image { dRender :: Renderer
                      , dPick   :: Picker a
+                     , dPreRender :: IO ()
                      }
 
 instance Functor Image where
     fmap f d = Image {
         dRender = dRender d,
-        dPick = fmap f (dPick d)
+        dPick = fmap f (dPick d),
+        dPreRender = dPreRender d
       }
 
 instance Applicative Image where
     pure x = Image {
         dRender = (pure.pure.pure) (),
-        dPick = const x
+        dPick = const x,
+        dPreRender = return ()
       }
 
     df <*> dx = Image {
         -- reversed so that things that come first go on top
         dRender = (liftA2.liftA2.liftA2) mappend (dRender dx) (dRender df),
-        dPick = dPick df <*> dPick dx
+        dPick = dPick df <*> dPick dx,
+        dPreRender = liftA2 mappend (dPreRender df) (dPreRender dx)
       }
 
 instance (Monoid m) => Monoid (Image m) where
@@ -147,6 +145,7 @@ render d = GL.preservingAttrib [GL.AllServerAttributes] $ do
     GL.lineWidth GL.$= 1.5
     GL.hint GL.LineSmooth GL.$= GL.DontCare
 
+    dPreRender d
     dRender d identity white
 
 -- |Like 'render', but clears the screen first. This is so
@@ -178,7 +177,7 @@ toVertex3 z tr p = let (x,y) = tr `apply` p in GL.Vertex3 x y z
 -- > [[point p]] r | [[r]] == [[p]] = (one, Any True)
 -- >               | otherwise      = (zero, Any False)
 point :: R2 -> Image Any
-point p = Image render' (const (Any False))
+point p = Image render' (const (Any False)) (return ())
     where
     render' tr _ = withoutTextures . GL.renderPrimitive GL.Points . GL.vertex $ toVertex tr p
 
@@ -188,7 +187,7 @@ withoutTextures action =
 
 -- | A line connecting the two given points.
 line :: R2 -> R2 -> Image Any
-line src dest = Image render' (const (Any False))
+line src dest = Image render' (const (Any False)) (return ())
     where
     render' tr _ = withoutTextures . GL.renderPrimitive GL.Lines $ do
         GL.vertex $ toVertex tr src
@@ -207,7 +206,7 @@ circle = regularPoly 24
 
 -- | A convex polygon given by the list of points.
 convexPoly :: [R2] -> Image Any
-convexPoly points@(_:_:_:_) = Image render' pick
+convexPoly points@(_:_:_:_) = Image render' pick (return ())
     where
     render' tr _ =
         withoutTextures . GL.renderPrimitive GL.Polygon $ mapM_ (GL.vertex . toVertex tr) points
@@ -224,7 +223,7 @@ convexPoly _ = error "convexPoly must be given at least three points"
 -- and smoothly interpolates between the rest.  It is the empty
 -- image ('mempty') if zero or one points are given.
 bezierCurve :: [R2] -> Image Any
-bezierCurve controlPoints = Image render' (const (Any False))
+bezierCurve controlPoints = Image render' (const (Any False)) (return ())
     where
     render' tr _ = do
         let ps = map (toVertex3 0 tr) controlPoints
@@ -243,7 +242,7 @@ infixr 1 %%
 --
 -- > [[tr % im]] = [[im]] . inverse [[tr]]
 (%%) :: Affine -> Image a -> Image a
-tr' %% d = tr' `seq` Image render' pick
+tr' %% d = tr' `seq` Image render' pick (dPreRender d)
     where
     render' tr col = dRender d (tr `compose` tr') col
     pick = dPick d . apply (inverse tr')
@@ -253,44 +252,13 @@ tr' %% d = tr' `seq` Image render' pick
   Colors
 -------------}
 
--- | Color is defined in the usual computer graphics sense:
--- a 4 vector containing red, green, blue, and alpha.
---
--- The Monoid instance is given by alpha composition, described
--- at @http:\/\/lukepalmer.wordpress.com\/2010\/02\/05\/associative-alpha-blending\/@
---
--- In the semantcs the values @zero@ and @one@ are used, which are defined as:
---
--- > zero = Color 0 0 0 0
--- > one = Color 1 1 1 1
-data Color = Color !R !R !R !R
-    deriving (Eq,Show)
-
-instance Monoid Color where
-    mempty = Color 0 0 0 0
-    mappend (Color r g b a) (Color r' g' b' a') = Color (i r r') (i g g') (i b b') γ
-        where
-        γ = a + a' - a * a'
-        i | γ == 0    = \_ _ -> 0  -- imples a = a' = 0
-          | otherwise = \x y -> (a*x + (1-a)*a'*y)/γ
-
-white :: Color
-white = Color 1 1 1 1
-
--- | Modulate two colors by each other.
---
--- > modulate (Color r g b a) (Color r' g' b' a')
--- >           = Color (r*r') (g*g') (b*b') (a*a')
-modulate :: Color -> Color -> Color
-modulate (Color r g b a) (Color r' g' b' a') = Color (r*r') (g*g') (b*b') (a*a')
-
 -- | Tint an image by a color; i.e. modulate the colors of an image by
 -- a color.
 --
 -- > [[tint c im]] = first (modulate c) . [[im]]
 -- >    where first f (x,y) = (f x, y)
 tint :: Color -> Image a -> Image a
-tint c d = Image render' (dPick d)
+tint c d = Image render' (dPick d) (dPreRender d)
     where
     render' tr col = do
         let oldColor = col
@@ -324,7 +292,7 @@ openSprite path = do
 -- > [[sprite s]] p | p `elem` [-1,1]^2 = ([[s]] p, Any True)
 -- >                | otherwise         = (zero, Any False)
 sprite :: Sprite -> Image Any
-sprite spr = Image render' pick
+sprite spr = Image render' pick (return ())
     where
     render' tr _ = do
         GL.texture GL.Texture2D GL.$= GL.Enabled
@@ -344,111 +312,15 @@ sprite spr = Image render' pick
                | otherwise                              = Any False
     texcoord x y = GL.texCoord $ GL.TexCoord2 (x :: GL.GLdouble) (y :: GL.GLdouble)
 
-{---------
- Text
----------}
-
 -- | The image representing some text rendered with a font.  The baseline
 -- is at y=0, the text starts at x=0, and the height of a lowercase x is
 -- 1 unit.
-text :: Font -> String -> Image Any
-text font str = Image render' pick
+text :: Font -> String -> TextAttrs -> Image Any
+text font str textAttrs = Image (renderText font str textAttrs) pick (prepareText font str)
     where
-    render' tr _ = withMultGLmatrix tr $ renderText font str
     pick (x,y)
       | 0 <= x && x <= textBoundingWidth font str && -0.5 <= y && y <= 1.5 = Any True
-      | otherwise                                             = Any False
-
-withFont :: Int -> FilePath -> (Font -> IO a) -> IO a
-withFont = withFontCatch (Exception.throwIO :: Exception.SomeException -> IO a)
-
-#ifdef LAME_FONTS
-
-data Font = Font !Int
-
-initGLUT :: IO ()
-initGLUT = do
-    inited <- GLUT.get GLUT.initState
-    unless inited (() <$ GLUT.initialize "" [])
-
-withFontCatch :: Exception e => (e -> IO a) -> Int -> FilePath -> (Font -> IO a) -> IO a
-withFontCatch openFontError size path act =
-    (Nothing <$ initGLUT)
-    `Exception.catch` (fmap Just . openFontError)
-    >>= maybe (act (Font size)) return
-
-fontHeight :: Font -> R
-fontHeight (Font size) = 2 * fromIntegral size
-
-fontDescender :: Font -> R
-fontDescender (Font size) = -0.5 * fromIntegral size
-
-fontAscender :: Font -> R
-fontAscender (Font size) = 1.5 * fromIntegral size
-
-renderText :: Font -> String -> IO ()
-renderText (Font size) str = do
-    GL.scale s s 1
-    GLUT.renderString GLUT.Roman str
-    where
-        s :: GL.GLdouble
-        s = fromIntegral size / 72
-
-glutTextWidth :: Font -> String -> R
-glutTextWidth (Font size) str =
-    fromIntegral size / 72 * fromIntegral (unsafePerformIO (GLUT.stringWidth GLUT.Roman str))
-
-textBoundingWidth :: Font -> String -> R
-textBoundingWidth = glutTextWidth
-
-textAdvance :: Font -> String -> R
-textAdvance = glutTextWidth
-
-#else
-
-data Font = Font
-    { _getFontSize :: !Int
-    , getFont :: !FTGL.Font
-    }
-
-fontHeight :: Font -> R
-fontHeight (Font size _) = fromIntegral size
-
-renderText :: Font -> String -> IO ()
-renderText (Font _ font) str = FTGL.renderFont font str FTGL.All
-
-fontDescender :: Font -> R
-fontDescender = realToFrac . FTGL.getFontDescender . getFont
-
-fontAscender :: Font -> R
-fontAscender = realToFrac . FTGL.getFontAscender . getFont
-
--- | Load a TTF font from a file. This is CPS'd to take care of finalization
-withFontCatch :: Exception e => (e -> IO a) -> Int -> FilePath -> (Font -> IO a) -> IO a
-withFontCatch openFontError size path act =
-    Exception.bracket
-    ((Right <$> FTGL.createBufferFont path) `Exception.catch` (fmap Left . openFontError))
-    (either (const (return ())) FTGL.destroyFont) $
-    \eFont ->
-    case eFont of
-    Left res -> return res
-    Right font -> do
-        _ <- FTGL.setFontFaceSize font size 72
-        act (Font size font)
-
--- | @textBoundingWidth font str@ is the width of the text in @text font str@.
-textBoundingWidth :: Font -> String -> R
-textBoundingWidth font str =
-    realToFrac $ urx + llx
-    where
-        [llx, _lly, _llz, urx, _ury, _urz] =
-            unsafePerformIO $ FTGL.getFontBBox (getFont font) str
-
-textAdvance :: Font -> String -> R
-textAdvance font str =
-    realToFrac $ unsafePerformIO $ FTGL.getFontAdvance (getFont font) str
-
-#endif
+      | otherwise                                                          = Any False
 
 -- | Import an OpenGL action and pure sampler function into an Image.
 -- This ought to be a well-behaved, compositional action (make sure
@@ -457,6 +329,6 @@ textAdvance font str =
 -- action is the current tint color; modulate all your colors by this
 -- before setting them.
 unsafeOpenGLImage :: (Color -> IO ()) -> (R2 -> a) -> Image a
-unsafeOpenGLImage draw pick = Image render' pick
+unsafeOpenGLImage draw pick = Image render' pick (return ())
     where
     render' tr col = GL.preservingAttrib [GL.AllServerAttributes] . withMultGLmatrix tr $ draw col

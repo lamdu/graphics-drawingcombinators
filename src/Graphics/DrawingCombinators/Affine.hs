@@ -11,12 +11,13 @@ roughly translate, rotate, scale, and compositions thereof.
 module Graphics.DrawingCombinators.Affine
     ( R, R2, Affine
     , compose, apply, identity, translate, rotate, scale, inverse
-    , multGLmatrix, withMultGLmatrix
+    , asMat4, multGLmatrix, withMultGLmatrix
     )
 where
 
+-- import           Data.Monoid
+import           Graphics.FreetypeGL.Mat4 (Mat4(..))
 import qualified Graphics.Rendering.OpenGL.GL as GL
-import Data.Monoid
 
 type R = GL.GLdouble
 type R2 = (R,R)
@@ -29,6 +30,8 @@ type R2 = (R,R)
 data Affine = M !R !R !R
                 !R !R !R
              --  0  0  1
+instance Show Affine where
+    show (M a b c d e f) = show [[a,b,c],[d,e,f]]
 
 instance Monoid Affine where
     mempty = identity
@@ -78,6 +81,15 @@ rotate t = M cost (-sint) 0
 scale :: R -> R -> Affine
 scale x y = M x 0 0
               0 y 0
+
+asMat4 :: Affine -> Mat4
+asMat4 (M x11 x12 x13 x21 x22 x23) =
+    Mat4 (f x11) (f x21) (f 0) (f 0)
+         (f x12) (f x22) (f 0) (f 0)
+         (f   0) (f   0) (f 1) (f 0)
+         (f x13) (f x23) (f 0) (f 1)
+    where
+        f = realToFrac
 
 -- | Multiply this Affine by the top of the OpenGL matrix stack.
 -- Don't mind this, it\'s an implementation detail.

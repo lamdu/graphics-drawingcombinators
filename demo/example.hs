@@ -33,15 +33,15 @@ square = Draw.convexPoly [ (-1, 1), (1, 1), (1, -1), (-1, -1) ]
 unitText :: Draw.Font -> String -> Draw.Image Any
 unitText font str =
     mconcat
-    [ Draw.tint (Draw.Color 1 0 0 1) $
-      Draw.line (-1,0) (1,0)
-    , Draw.translate (-1,0) <> Draw.scale s s %%
-      Draw.text font str
-    , Draw.tint (Draw.Color 0 0.6 0 1) $
-      Draw.scale 1 s <> Draw.translate (0, 0.5) %%
+    [ Draw.translate (-1,0) <> Draw.scale s s %%
+      Draw.text font str attrs
+    , Draw.tint (Draw.Color 0 0.6 0 0.5) $
+      Draw.scale 1 (h / w) <> Draw.translate (0, 0.5) %%
       square
     ]
     where
+        attrs = Draw.defTextAttrs { Draw.mUnderline = Just (Draw.Color 1 0 0 1) }
+        h = Draw.fontHeight font
         s = 2 / w
         w = Draw.textBoundingWidth font str
 
