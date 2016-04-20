@@ -76,9 +76,10 @@ main = do
     win <- initScreen
     args <- getArgs
     (fontName, pic) <- case args of
+        [fontName] -> return (fontName, mempty)
         [fontName, picName] -> do
             pic <- Draw.openSprite picName
-            return (fontName, pic)
+            return (fontName, Draw.sprite pic)
         _ -> error "Usage: drawingcombinators-example some_font.ttf some_img.png"
     Draw.withFont fontName $ \font -> do
 
@@ -90,7 +91,7 @@ main = do
                 quadrants
                 ( mconcat
                   [ Draw.scale 0.2 0.2 %%
-                    fromAny "sprite" <$> Draw.sprite pic
+                    fromAny "sprite" <$> pic
                   , circleText font "Hej, World!"
                   ] )
         imageRef <- newIORef $ mkImage 0
