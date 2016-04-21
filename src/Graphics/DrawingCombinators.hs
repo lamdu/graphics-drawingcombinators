@@ -71,7 +71,7 @@ module Graphics.DrawingCombinators
     -- * Sprites (images from files)
     , Sprite, openSprite, sprite
     -- * Text
-    , Font, openFont, withFont, withFontCatch, fontDescender, fontAscender
+    , Font, withFont, withFontCatch, fontDescender, fontAscender
     , text, textHeight, textBoundingWidth, textAdvance
     -- * Extensions
     , unsafeOpenGLImage
@@ -94,7 +94,6 @@ import qualified Graphics.UI.GLUT as GLUT
 import Control.Monad (unless)
 #else
 import qualified Graphics.Rendering.FTGL as FTGL
-import System.Mem.Weak (addFinalizer)
 #endif
 
 type Renderer = Affine -> Color -> IO ()
@@ -376,14 +375,6 @@ withFontCatch openFontError path act =
 withFont :: FilePath -> (Font -> IO a) -> IO a
 withFont path act = openFont path >>= act
 
--- Safe with GLUT only
-{-# DEPRECATED openFont "This is unsafe when ftgl flag is enabled" #-}
-openFont :: String -> IO Font
-openFont _ = do
-    inited <- GLUT.get GLUT.initState
-    unless inited $ GLUT.initialize "" [] >> return ()
-    return Font
-
 fontDescender :: Font -> R
 fontDescender Font = -0.5
 
@@ -421,18 +412,6 @@ fontDescender = (* (textHeight / fontSize)) . realToFrac . FTGL.getFontDescender
 
 fontAscender :: Font -> R
 fontAscender = (* (textHeight / fontSize)) . realToFrac . FTGL.getFontAscender . getFont
-
--- | Load a TTF font from a file.
---
--- See discussion at:
--- http://hackage.haskell.org/package/base-4.8.0.0/docs/System-Mem-Weak.html#v:addFinalizer
-{-# DEPRECATED openFont "This is unsafe due to the finalizer possibly running earlier than expected" #-}
-openFont :: FilePath -> IO Font
-openFont path = do
-    font <- FTGL.createBufferFont path
-    addFinalizer font (FTGL.destroyFont font)
-    _ <- FTGL.setFontFaceSize font 72 72
-    return $ Font font
 
 withFontCatch :: Exception e => (e -> IO a) -> FilePath -> (Font -> IO a) -> IO a
 withFontCatch openFontError path act =
