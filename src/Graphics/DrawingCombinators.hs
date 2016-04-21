@@ -72,7 +72,7 @@ module Graphics.DrawingCombinators
     , Sprite, openSprite, sprite
     -- * Text
     , Font, openFont, withFont, withFontCatch, fontDescender, fontAscender
-    , text, textHeight, textWidth, textBoundingWidth, textAdvance
+    , text, textHeight, textBoundingWidth, textAdvance
     -- * Extensions
     , unsafeOpenGLImage
     , Monoid(..), Any(..)
@@ -87,7 +87,7 @@ import Data.Monoid (Monoid(..), Any(..))
 import qualified Data.Bitmap.OpenGL as Bitmap
 import qualified Graphics.Rendering.OpenGL.GL as GL
 import qualified Codec.Image.STB as Image
-import System.IO.Unsafe (unsafePerformIO)  -- for pure textWidth
+import System.IO.Unsafe (unsafePerformIO)  -- for pure text metrics
 
 #ifdef LAME_FONTS
 import qualified Graphics.UI.GLUT as GLUT
@@ -357,12 +357,8 @@ text font str = Image render' pick
     where
     render' tr _ = withMultGLmatrix tr $ renderText font str
     pick (x,y)
-      | 0 <= x && x <= textWidth font str && -0.5 <= y && y <= 1.5 = Any True
+      | 0 <= x && x <= textBoundingWidth font str && -0.5 <= y && y <= 1.5 = Any True
       | otherwise                                             = Any False
-
-{-# DEPRECATED textWidth "Use textBoundingWidth or textAdvance instead" #-}
-textWidth :: Font -> String -> R
-textWidth font str = max (textAdvance font str) (textBoundingWidth font str)
 
 textHeight :: R
 textHeight = 2
@@ -453,7 +449,7 @@ withFontCatch openFontError path act =
 withFont :: FilePath -> (Font -> IO a) -> IO a
 withFont = withFontCatch (Exception.throwIO :: Exception.SomeException -> IO a)
 
--- | @textWidth font str@ is the width of the text in @text font str@.
+-- | @textBoundingWidth font str@ is the width of the text in @text font str@.
 textBoundingWidth :: Font -> String -> R
 textBoundingWidth font str =
     (* (textHeight / fontSize)) . realToFrac $ urx + llx
