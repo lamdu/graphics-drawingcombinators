@@ -5,7 +5,7 @@ module Graphics.DrawingCombinators.Text
     , fontAscender, fontDescender, fontHeight
     , textAdvance
     , BoundingBox(..), textBoundingBox, textBoundingWidth
-    , renderText, prepareText
+    , renderText
     , TextAttrs(..), defTextAttrs
     ) where
 
@@ -130,13 +130,14 @@ getMatrix mode = do
     return $ Mat4.fromList16 $ map realToFrac components
 
 -- Add everything to the text buffers' atlases before rendering anything:
-prepareText :: Font -> String -> IO ()
-prepareText font str =
-    void $ withTextBufferStr font Markup.def str $ \_textBuffer -> return ()
+prepareText :: Font -> String -> Markup -> IO ()
+prepareText font str markup =
+    void $ withTextBufferStr font markup str $ \_textBuffer -> return ()
 
-renderText :: Font -> String -> TextAttrs -> Affine -> Color -> IO ()
-renderText font str attrs tr tintColor =
-    void $ withTextBufferStr font markup str $ \textBuffer -> lift $ do
+renderText :: Font -> String -> TextAttrs -> Affine -> Color -> IO (IO ())
+renderText font str attrs tr tintColor = do
+    prepareText font str markup
+    return $ void $ withTextBufferStr font markup str $ \textBuffer -> lift $ do
         projection <- getMatrix (Just GL.Projection)
         modelView <- getMatrix (Just (GL.Modelview 0))
         Shader.bindTextShaderUniforms (getShader font) Shader.TextShaderUniforms

@@ -83,6 +83,7 @@ where
 
 import qualified Codec.Image.STB as Image
 import           Control.Applicative (Applicative(..), liftA2, (<$>), (<$))
+import           Control.Monad (join)
 import qualified Data.Bitmap.OpenGL as Bitmap
 import           Data.Monoid (Monoid(..), Any(..))
 import           Graphics.DrawingCombinators.Affine
@@ -90,7 +91,6 @@ import           Graphics.DrawingCombinators.Color
 import           Graphics.DrawingCombinators.Text
 import qualified Graphics.Rendering.OpenGL.GL as GL
 
-type Renderer = Affine -> Color -> IO ()
 type Picker a = R2 -> a
 
 -- | The type of images.
@@ -100,30 +100,26 @@ type Picker a = R2 -> a
 -- The semantics of the instances are all consistent with /type class morphism/.
 -- I.e. Functor, Applicative, and Monoid act point-wise, using the 'Color' monoid
 -- described below.
-data Image a = Image { dRender :: Renderer
+data Image a = Image { dRender :: Affine -> Color -> IO (IO ())
                      , dPick   :: Picker a
-                     , dPreRender :: IO ()
                      }
 
 instance Functor Image where
     fmap f d = Image {
         dRender = dRender d,
-        dPick = fmap f (dPick d),
-        dPreRender = dPreRender d
+        dPick = fmap f (dPick d)
       }
 
 instance Applicative Image where
     pure x = Image {
-        dRender = (pure.pure.pure) (),
-        dPick = const x,
-        dPreRender = return ()
+        dRender = (pure.pure.pure.pure) (),
+        dPick = const x
       }
 
     df <*> dx = Image {
         -- reversed so that things that come first go on top
-        dRender = (liftA2.liftA2.liftA2) mappend (dRender dx) (dRender df),
-        dPick = dPick df <*> dPick dx,
-        dPreRender = liftA2 mappend (dPreRender df) (dPreRender dx)
+        dRender = (liftA2.liftA2.liftA2.liftA2) mappend (dRender dx) (dRender df),
+        dPick = dPick df <*> dPick dx
       }
 
 instance (Monoid m) => Monoid (Image m) where
@@ -145,8 +141,7 @@ render d = GL.preservingAttrib [GL.AllServerAttributes] $ do
     GL.lineWidth GL.$= 1.5
     GL.hint GL.LineSmooth GL.$= GL.DontCare
 
-    dPreRender d
-    dRender d identity white
+    join $ dRender d identity white
 
 -- |Like 'render', but clears the screen first. This is so
 -- you can use this module and pretend that OpenGL doesn't
@@ -177,9 +172,9 @@ toVertex3 z tr p = let (x,y) = tr `apply` p in GL.Vertex3 x y z
 -- > [[point p]] r | [[r]] == [[p]] = (one, Any True)
 -- >               | otherwise      = (zero, Any False)
 point :: R2 -> Image Any
-point p = Image render' (const (Any False)) (return ())
+point p = Image render' (const (Any False))
     where
-    render' tr _ = withoutTextures . GL.renderPrimitive GL.Points . GL.vertex $ toVertex tr p
+    render' tr _ = pure . withoutTextures . GL.renderPrimitive GL.Points . GL.vertex $ toVertex tr p
 
 withoutTextures :: IO a -> IO a
 withoutTextures action =
@@ -187,9 +182,9 @@ withoutTextures action =
 
 -- | A line connecting the two given points.
 line :: R2 -> R2 -> Image Any
-line src dest = Image render' (const (Any False)) (return ())
+line src dest = Image render' (const (Any False))
     where
-    render' tr _ = withoutTextures . GL.renderPrimitive GL.Lines $ do
+    render' tr _ = pure . withoutTextures . GL.renderPrimitive GL.Lines $ do
         GL.vertex $ toVertex tr src
         GL.vertex $ toVertex tr dest
 
@@ -206,10 +201,11 @@ circle = regularPoly 24
 
 -- | A convex polygon given by the list of points.
 convexPoly :: [R2] -> Image Any
-convexPoly points@(_:_:_:_) = Image render' pick (return ())
+convexPoly points@(_:_:_:_) = Image render' pick
     where
     render' tr _ =
-        withoutTextures . GL.renderPrimitive GL.Polygon $ mapM_ (GL.vertex . toVertex tr) points
+        pure . withoutTextures . GL.renderPrimitive GL.Polygon $
+        mapM_ (GL.vertex . toVertex tr) points
     pick p = Any $ all (sign . side p) edges
         where
         edges = zipWith (,) points (tail points)
@@ -223,9 +219,9 @@ convexPoly _ = error "convexPoly must be given at least three points"
 -- and smoothly interpolates between the rest.  It is the empty
 -- image ('mempty') if zero or one points are given.
 bezierCurve :: [R2] -> Image Any
-bezierCurve controlPoints = Image render' (const (Any False)) (return ())
+bezierCurve controlPoints = Image render' (const (Any False))
     where
-    render' tr _ = do
+    render' tr _ = pure $ do
         let ps = map (toVertex3 0 tr) controlPoints
         m <- GL.newMap1 (0,1) ps :: IO (GL.GLmap1 (GL.Vertex3) R)
         GL.map1 GL.$= Just m
@@ -242,7 +238,7 @@ infixr 1 %%
 --
 -- > [[tr % im]] = [[im]] . inverse [[tr]]
 (%%) :: Affine -> Image a -> Image a
-tr' %% d = tr' `seq` Image render' pick (dPreRender d)
+tr' %% d = tr' `seq` Image render' pick
     where
     render' tr col = dRender d (tr `compose` tr') col
     pick = dPick d . apply (inverse tr')
@@ -258,15 +254,14 @@ tr' %% d = tr' `seq` Image render' pick (dPreRender d)
 -- > [[tint c im]] = first (modulate c) . [[im]]
 -- >    where first f (x,y) = (f x, y)
 tint :: Color -> Image a -> Image a
-tint c d = Image render' (dPick d) (dPreRender d)
+tint c d = Image render' (dPick d)
     where
     render' tr col = do
         let oldColor = col
             newColor = modulate c col
-        setColor newColor
-        result <- dRender d tr newColor
-        setColor oldColor
-        return result
+        withColor oldColor newColor <$> dRender d tr newColor
+    withColor oldColor newColor oldRender =
+        setColor newColor *> oldRender <* setColor oldColor
     setColor (Color r g b a) = GL.color $ GL.Color4 r g b a
 
 
@@ -292,9 +287,9 @@ openSprite path = do
 -- > [[sprite s]] p | p `elem` [-1,1]^2 = ([[s]] p, Any True)
 -- >                | otherwise         = (zero, Any False)
 sprite :: Sprite -> Image Any
-sprite spr = Image render' pick (return ())
+sprite spr = Image render' pick
     where
-    render' tr _ = do
+    render' tr _ = pure $ do
         GL.texture GL.Texture2D GL.$= GL.Enabled
         oldtex <- GL.get (GL.textureBinding GL.Texture2D)
         GL.textureBinding GL.Texture2D GL.$= (Just $ spriteObject spr)
@@ -316,7 +311,7 @@ sprite spr = Image render' pick (return ())
 -- is at y=0, the text starts at x=0, and the height of a lowercase x is
 -- 1 unit.
 text :: Font -> String -> TextAttrs -> Image Any
-text font str textAttrs = Image (renderText font str textAttrs) pick (prepareText font str)
+text font str textAttrs = Image (renderText font str textAttrs) pick
     where
     pick (x,y)
       | 0 <= x && x <= textBoundingWidth font str && -0.5 <= y && y <= 1.5 = Any True
@@ -329,6 +324,8 @@ text font str textAttrs = Image (renderText font str textAttrs) pick (prepareTex
 -- action is the current tint color; modulate all your colors by this
 -- before setting them.
 unsafeOpenGLImage :: (Color -> IO ()) -> (R2 -> a) -> Image a
-unsafeOpenGLImage draw pick = Image render' pick (return ())
+unsafeOpenGLImage draw pick = Image render' pick
     where
-    render' tr col = GL.preservingAttrib [GL.AllServerAttributes] . withMultGLmatrix tr $ draw col
+    render' tr col =
+        pure . GL.preservingAttrib [GL.AllServerAttributes] . withMultGLmatrix tr $
+        draw col
