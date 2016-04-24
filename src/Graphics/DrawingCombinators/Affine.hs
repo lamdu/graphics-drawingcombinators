@@ -9,8 +9,9 @@ roughly translate, rotate, scale, and compositions thereof.
 -}
 
 module Graphics.DrawingCombinators.Affine
-    ( R, R2, Affine
-    , compose, apply, identity, translate, rotate, scale, inverse
+    ( R, R2, Affine(..)
+    , compose, apply, identity
+    , translate, rotate, scale, inverse
     , asMat4, multGLmatrix, withMultGLmatrix
     )
 where
@@ -46,7 +47,7 @@ M x11 x12 x13 x21 x22 x23 `compose` M y11 y12 y13 y21 y22 y23 =
 -- | > [[apply a]] = [[a]]
 apply :: Affine -> R2 -> R2
 apply (M x11 x12 x13 x21 x22 x23) (y1,y2) =
-    (x11*y1+x12*y2+x13, x21*y1+x22*y2+x23)
+    (x11*y1 + x12*y2 + x13, x21*y1 + x22*y2 + x23)
 
 -- | > [[identity]] = id
 identity :: Affine

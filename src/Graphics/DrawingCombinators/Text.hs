@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 -- | Text-rendering and fonts component of Drawing Combinators
 
 module Graphics.DrawingCombinators.Text
@@ -23,34 +24,37 @@ import           Graphics.FreetypeGL.Markup (Markup(..))
 import qualified Graphics.FreetypeGL.Markup as Markup
 import           Graphics.FreetypeGL.Mat4 (Mat4)
 import qualified Graphics.FreetypeGL.Mat4 as Mat4
+import           Graphics.FreetypeGL.RGBA (RGBA(..))
 import           Graphics.FreetypeGL.Shader (Shader)
 import qualified Graphics.FreetypeGL.Shader as Shader
 import           Graphics.FreetypeGL.TextBuffer (TextBuffer, BoundingBox(..))
 import qualified Graphics.FreetypeGL.TextBuffer as TextBuffer
+import qualified Graphics.FreetypeGL.TextureAtlas as TextureAtlas
 import           Graphics.FreetypeGL.TextureFont (TextureFont)
 import qualified Graphics.FreetypeGL.TextureFont as TextureFont
 import qualified Graphics.Rendering.OpenGL.GL as GL
 import           System.IO.Unsafe (unsafePerformIO) -- for pure text metrics
 
+data FTGLFont = FTGLFont
+    { _getTextureFont :: !TextureFont
+    , getTextBuffer :: !(MVar TextBuffer)
+    , getShader :: !Shader
+    }
+
 data Font = Font
-    { _getFont :: !TextureFont
-    , _getTextBuffer :: !(MVar TextBuffer)
-    , getShader :: Shader
+    { getLCDFont :: !FTGLFont
+    , getScaledFont :: !FTGLFont
     }
 
 withFont :: Float -> FilePath -> (Font -> IO a) -> IO a
 withFont =
     withFontCatch (Exception.throwIO :: Exception.SomeException -> IO a)
 
-withNewTextBuffer :: (Shader -> TextBuffer -> IO a) -> IO a
-withNewTextBuffer act = do
-    -- TODO: Is it OK to do multiple GLEW inits?
-    initFreetypeGL
-    -- TODO: Don't leak shader
-    shader <- Shader.newTextShader
+withNewTextBuffer :: Shader -> TextBuffer.RenderDepth -> (TextBuffer -> IO a) -> IO a
+withNewTextBuffer shader renderDepth act =
     Exception.bracket
-        (TextBuffer.new TextBuffer.LCD_FILTERING_ON shader)
-        TextBuffer.delete (act shader)
+    (TextBuffer.new renderDepth shader)
+    TextBuffer.delete act
 
 catchOrElse :: Exception e => IO a -> (e -> IO b) -> (a -> IO b) -> IO b
 catchOrElse act err success =
@@ -58,16 +62,34 @@ catchOrElse act err success =
     Exception.try (restore act) >>= either err (restore . success)
 
 -- | Load a TTF font from a file. This is CPS'd to take care of finalization
-withFontCatch :: Exception e => (e -> IO a) -> Float -> FilePath -> (Font -> IO a) -> IO a
-withFontCatch openFontError size path act =
-    withNewTextBuffer $ \shader textBuffer ->
+withFTGLFontCatch ::
+    Exception e => Shader -> TextBuffer.RenderDepth -> (e -> IO a) ->
+    Float -> FilePath -> (FTGLFont -> IO a) -> IO a
+withFTGLFontCatch shader renderDepth openFontError size path act =
+    withNewTextBuffer shader renderDepth $ \textBuffer ->
     do
         manager <- TextBuffer.getFontManager textBuffer
         catchOrElse
             (FontManager.getFromFileName manager path size)
             openFontError $ \font -> do
                 mvar <- newMVar textBuffer
-                act (Font font mvar shader)
+                act (FTGLFont font mvar shader)
+
+withFontCatch :: Exception e => (e -> IO a) -> Float -> FilePath -> (Font -> IO a) -> IO a
+withFontCatch openFontError size path act =
+    do
+        initFreetypeGL
+        lcdShader <- Shader.newTextShader
+        scaleShader <- Shader.newDistanceFieldShader
+        withFTGLFontCatch lcdShader TextBuffer.LCD_FILTERING_ON
+            openFontError size path $ \lcdFont ->
+            withFTGLFontCatch scaleShader TextBuffer.LCD_FILTERING_OFF
+            openFontError size path $ \scaledFont -> do
+                withMVar (getTextBuffer scaledFont) $ \scaledTextBuffer -> do
+                    scaledManager <- TextBuffer.getFontManager scaledTextBuffer
+                    scaledAtlas <- FontManager.getAtlas scaledManager
+                    TextureAtlas.setMode scaledAtlas TextureAtlas.DistanceField
+                act (Font lcdFont scaledFont)
 
 data TextAttrs = TextAttrs
     { spacing :: !Float
@@ -101,10 +123,10 @@ toMarkup tintColor (TextAttrs spc gma fgColor outline underLn overLn strikeThru)
         tint = toRGBA . modulate tintColor
 
 withTextBufferStr ::
-    Font -> Markup -> String ->
+    FTGLFont -> Markup -> String ->
     (TextBuffer -> StateT TextBuffer.Pen IO a) ->
     IO (a, TextBuffer.Pen)
-withTextBufferStr (Font font mvarTextBuffer _) markup str act =
+withTextBufferStr (FTGLFont font mvarTextBuffer _) markup str act =
     withMVar mvarTextBuffer $ \textBuffer -> do
         h <- TextureFont.height font
         d <- TextureFont.descender font
@@ -115,13 +137,13 @@ withTextBufferStr (Font font mvarTextBuffer _) markup str act =
                 act textBuffer
 
 fontHeight :: Font -> R
-fontHeight (Font font _ _) = realToFrac . unsafePerformIO $ TextureFont.height font
+fontHeight (Font (FTGLFont font _ _) _) = realToFrac . unsafePerformIO $ TextureFont.height font
 
 fontDescender :: Font -> R
-fontDescender (Font font _ _) = realToFrac . unsafePerformIO $ TextureFont.descender font
+fontDescender (Font (FTGLFont font _ _) _) = realToFrac . unsafePerformIO $ TextureFont.descender font
 
 fontAscender :: Font -> R
-fontAscender (Font font _ _) = realToFrac . unsafePerformIO $ TextureFont.ascender font
+fontAscender (Font (FTGLFont font _ _) _) = realToFrac . unsafePerformIO $ TextureFont.ascender font
 
 getMatrix :: Maybe GL.MatrixMode -> IO Mat4
 getMatrix mode = do
@@ -130,28 +152,76 @@ getMatrix mode = do
     return $ Mat4.fromList16 $ map realToFrac components
 
 -- Add everything to the text buffers' atlases before rendering anything:
-prepareText :: Font -> String -> Markup -> IO ()
+prepareText :: FTGLFont -> String -> Markup -> IO ()
 prepareText font str markup =
     void $ withTextBufferStr font markup str $ \_textBuffer -> return ()
 
+bindTextShaderUniforms :: Affine -> Shader -> Mat4 -> Mat4 -> IO ()
+bindTextShaderUniforms tr shader modelview projection =
+    Shader.bindTextShaderUniforms shader Shader.TextShaderUniforms
+    { Shader.textShaderModel = asMat4 tr
+    , Shader.textShaderView = modelview
+    , Shader.textShaderProjection = projection
+    }
+
+bindDistanceFieldShaderUniforms :: Affine -> Shader -> Mat4 -> Mat4 -> IO ()
+bindDistanceFieldShaderUniforms tr shader modelview projection =
+    Shader.bindDistanceFieldShaderUniforms shader Shader.DistanceFieldShaderUniforms
+    { Shader.distanceFieldColor = RGBA 1 1 1 1
+    , Shader.distanceFieldShaderModel = asMat4 tr
+    , Shader.distanceFieldShaderView = modelview
+    , Shader.distanceFieldShaderProjection = projection
+    }
+
+roundR :: R -> R
+roundR x = fromIntegral (round x :: Integer)
+
+-- This is virtually guaranteed to be smaller than a pixel in GL
+-- coordinate space:
+epsilon :: R
+epsilon = 1/131072
+
+roughly :: R -> R -> Bool
+roughly x y = abs (x-y) < epsilon
+
+-- | Extract an lcd-text compatible affine transformation, if possible
+-- without noticeable loss of quality
+lcdAffine :: Affine -> Maybe Affine
+lcdAffine (M a b x
+             c d y)
+    | a `roughly` 1 -- cannot rotate around x, would need to swap r,b channels
+    && b `roughly` 0
+    && c `roughly` 0
+      -- d need not be compared, vertical scaling should not interfere
+      -- with subpixel rendering
+      = Just $
+        M 1 0 (roundR x)
+          0 d (roundR y)
+lcdAffine _ = Nothing
+
 renderText :: Font -> String -> TextAttrs -> Affine -> Color -> IO (IO ())
-renderText font str attrs tr tintColor = do
-    prepareText font str markup
-    return $ void $ withTextBufferStr font markup str $ \textBuffer -> lift $ do
+renderText !font !str !attrs !tr !tintColor = do
+    prepareText ftglFont str markup
+    return $ void $ withTextBufferStr ftglFont markup str $ \textBuffer -> lift $ do
         projection <- getMatrix (Just GL.Projection)
-        modelView <- getMatrix (Just (GL.Modelview 0))
-        Shader.bindTextShaderUniforms (getShader font) Shader.TextShaderUniforms
-            { Shader.textShaderModel = asMat4 tr
-            , Shader.textShaderView = modelView
-            , Shader.textShaderProjection = projection
-            }
+        modelview <- getMatrix (Just (GL.Modelview 0))
+        bindShader (getShader ftglFont) modelview projection
         TextBuffer.render textBuffer
     where
+        (bindShader, ftglFont) =
+            case lcdAffine tr of
+            Nothing ->
+                -- Font is not just translated, use the scaleFont (distance-field) to render
+                (bindDistanceFieldShaderUniforms tr, getScaledFont font)
+            Just tr' ->
+                -- Font is just translated, we need to round to a
+                -- pixel and we can use prettier LCD rendering:
+                (bindTextShaderUniforms tr', getLCDFont font)
         markup = toMarkup tintColor attrs
 
 -- | @textBoundingBox font str@ is the pixel-bounding box around text in @text font str@.
 textBoundingBox :: Font -> String -> TextBuffer.BoundingBox
-textBoundingBox font str =
+textBoundingBox (Font font _) str =
     fst $ unsafePerformIO $ withTextBufferStr font Markup.def str $ \textBuffer ->
     TextBuffer.boundingBox textBuffer
 
@@ -163,7 +233,7 @@ textBoundingWidth font str =
 -- | @textAdvance font str@ is the x-advance of the text in
 -- @text font str@, i.e: where to place the next piece of text.
 textAdvance :: Font -> String -> R
-textAdvance font str =
+textAdvance (Font font _) str =
     realToFrac $ unsafePerformIO $ do
         ((), TextBuffer.Pen advanceX _advanceY) <-
             withTextBufferStr font Markup.def str $ \_ -> return ()
