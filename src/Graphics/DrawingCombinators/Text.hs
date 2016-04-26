@@ -3,7 +3,7 @@
 
 module Graphics.DrawingCombinators.Text
     ( Font, withFont, withFontCatch
-    , fontAscender, fontDescender, fontHeight
+    , fontAscender, fontDescender, fontHeight, fontLineGap
     , textAdvance
     , BoundingBox(..), textBoundingBox, textBoundingWidth
     , renderText
@@ -136,14 +136,20 @@ withTextBufferStr (FTGLFont font mvarTextBuffer _) markup str act =
                 TextBuffer.addText textBuffer markup font str
                 act textBuffer
 
+textMetric :: (TextureFont -> IO Float) -> Font -> R
+textMetric f (Font (FTGLFont font _ _) _) = realToFrac . unsafePerformIO $ f font
+
 fontHeight :: Font -> R
-fontHeight (Font (FTGLFont font _ _) _) = realToFrac . unsafePerformIO $ TextureFont.height font
+fontHeight = textMetric TextureFont.height
+
+fontLineGap :: Font -> R
+fontLineGap = textMetric TextureFont.lineGap
 
 fontDescender :: Font -> R
-fontDescender (Font (FTGLFont font _ _) _) = realToFrac . unsafePerformIO $ TextureFont.descender font
+fontDescender = textMetric TextureFont.descender
 
 fontAscender :: Font -> R
-fontAscender (Font (FTGLFont font _ _) _) = realToFrac . unsafePerformIO $ TextureFont.ascender font
+fontAscender = textMetric TextureFont.ascender
 
 getMatrix :: Maybe GL.MatrixMode -> IO Mat4
 getMatrix mode = do

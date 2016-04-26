@@ -70,7 +70,7 @@ module Graphics.DrawingCombinators
     , Sprite, openSprite, sprite
     -- * Text
     , Font, withFont, withFontCatch
-    , fontDescender, fontAscender, fontHeight
+    , fontDescender, fontAscender, fontHeight, fontLineGap
     , TextAttrs(..), defTextAttrs
     , text
     , BoundingBox(..), textBoundingBox, textBoundingWidth
