@@ -87,14 +87,9 @@ openFont :: Float -> FilePath -> IO Font
 openFont size path =
     do
         initFreetypeGL
-        lcdShader <- Shader.newTextShader
-        scaleShader <- Shader.newDistanceFieldShader
-        lcdFont <- newFTGLFont lcdShader TextBuffer.LCD_FILTERING_ON size path
-        scaledFont <- newFTGLFont scaleShader TextBuffer.LCD_FILTERING_OFF size path
-        withMVar (getTextBuffer scaledFont) $ \scaledTextBuffer -> do
-            scaledManager <- TextBuffer.getFontManager scaledTextBuffer
-            scaledAtlas <- FontManager.getAtlas scaledManager
-            TextureAtlas.setMode scaledAtlas TextureAtlas.DistanceField
+        shader <- Shader.newTextShader
+        lcdFont <- newFTGLFont shader TextBuffer.LCD_FILTERING_ON size path
+        scaledFont <- newFTGLFont shader TextBuffer.LCD_FILTERING_OFF size path
         return (Font lcdFont scaledFont)
 
 data TextAttrs = TextAttrs
@@ -176,15 +171,6 @@ bindTextShaderUniforms tr shader modelview projection =
     , Shader.textShaderProjection = projection
     }
 
-bindDistanceFieldShaderUniforms :: Affine -> Shader -> Mat4 -> Mat4 -> IO ()
-bindDistanceFieldShaderUniforms tr shader modelview projection =
-    Shader.bindDistanceFieldShaderUniforms shader Shader.DistanceFieldShaderUniforms
-    { Shader.distanceFieldColor = RGBA 1 1 1 1
-    , Shader.distanceFieldShaderModel = asMat4 tr
-    , Shader.distanceFieldShaderView = modelview
-    , Shader.distanceFieldShaderProjection = projection
-    }
-
 roundR :: R -> R
 roundR x = fromIntegral (round x :: Integer)
 
@@ -217,18 +203,19 @@ renderText !font !str !attrs !tr !tintColor = do
     return $ void $ withTextBufferStr ftglFont markup str $ \textBuffer -> lift $ do
         projection <- getMatrix (Just GL.Projection)
         modelview <- getMatrix (Just (GL.Modelview 0))
-        bindShader (getShader ftglFont) modelview projection
+        bindTextShaderUniforms tr' (getShader ftglFont) modelview projection
         TextBuffer.render textBuffer
     where
-        (bindShader, ftglFont) =
+        (tr', ftglFont) =
             case lcdAffine tr of
             Nothing ->
-                -- Font is not just translated, use the scaleFont (distance-field) to render
-                (bindDistanceFieldShaderUniforms tr, getScaledFont font)
-            Just tr' ->
+                -- Font is not just translated, use the scaleFont to
+                -- render
+                (tr, getScaledFont font)
+            Just lcdTr ->
                 -- Font is just translated, we need to round to a
                 -- pixel and we can use prettier LCD rendering:
-                (bindTextShaderUniforms tr', getLCDFont font)
+                (lcdTr, getLCDFont font)
         markup = toMarkup tintColor attrs
 
 -- | @textBoundingBox font str@ is the pixel-bounding box around text in @text font str@.
