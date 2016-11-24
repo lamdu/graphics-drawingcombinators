@@ -128,7 +128,7 @@ withTextBufferStr ::
     (TextBuffer -> StateT TextBuffer.Pen IO a) ->
     IO (a, TextBuffer.Pen)
 withTextBufferStr (FTGLFont font mvarTextBuffer _) markup str act =
-    withMVar mvarTextBuffer $ \textBuffer -> do
+    str `seq` withMVar mvarTextBuffer $ \textBuffer -> do
         h <- TextureFont.height font
         d <- TextureFont.descender font
         TextBuffer.clear textBuffer
