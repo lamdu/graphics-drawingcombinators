@@ -8,7 +8,7 @@ packages:
     commit: 839c7e00a7f48b33f13b7ce7914e713e4e2261ad
 - location:
     git: https://github.com/lamdu/FreetypeGL
-    commit: 06b07eb95b3d7c1c2a1d06f6af36960b7f8ab233
+    commit: e515827572c0e151aa351f5a4305a7f0b2190304
 extra-deps:
 - bitmap-0.0.2
 - bitmap-opengl-0.0.1.5
