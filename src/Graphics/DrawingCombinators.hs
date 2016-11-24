@@ -86,6 +86,7 @@ import           Control.Applicative (Applicative(..), liftA2, (<$>), (<$))
 import           Control.Monad (join)
 import qualified Data.Bitmap.OpenGL as Bitmap
 import           Data.Monoid (Monoid(..), Any(..))
+import           Data.Text (Text)
 import           Graphics.DrawingCombinators.Affine
 import           Graphics.DrawingCombinators.Color
 import           Graphics.DrawingCombinators.Text
@@ -311,7 +312,7 @@ sprite spr = Image render' pick
 -- | The image representing some text rendered with a font.  The baseline
 -- is at y=0, the text starts at x=0, and the height of a lowercase x is
 -- 1 unit.
-text :: Font -> String -> TextAttrs -> Image Any
+text :: Font -> Text -> TextAttrs -> Image Any
 text font str textAttrs = Image (renderText font str textAttrs) pick
     where
     pick (x,y)

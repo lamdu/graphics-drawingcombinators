@@ -19,6 +19,7 @@ import           Control.Monad.Trans.Class (lift)
 import           Control.Monad.Trans.State (StateT(..))
 import           Data.IORef
 import           Data.List (partition)
+import           Data.Text (Text)
 import           Graphics.DrawingCombinators.Affine
 import           Graphics.DrawingCombinators.Color
 import qualified Graphics.FreetypeGL.FontManager as FontManager
@@ -124,7 +125,7 @@ toMarkup tintColor (TextAttrs spc gma fgColor outline underLn overLn strikeThru)
         tint = toRGBA . modulate tintColor
 
 withTextBufferStr ::
-    FTGLFont -> Markup -> String ->
+    FTGLFont -> Markup -> Text ->
     (TextBuffer -> StateT TextBuffer.Pen IO a) ->
     IO (a, TextBuffer.Pen)
 withTextBufferStr (FTGLFont font mvarTextBuffer _) markup str act =
@@ -159,7 +160,7 @@ getMatrix mode = do
     return $ Mat4.fromList16 $ map realToFrac components
 
 -- Add everything to the text buffers' atlases before rendering anything:
-prepareText :: FTGLFont -> String -> Markup -> IO ()
+prepareText :: FTGLFont -> Text -> Markup -> IO ()
 prepareText font str markup =
     void $ withTextBufferStr font markup str $ \_textBuffer -> return ()
 
@@ -197,7 +198,7 @@ lcdAffine (M a b x
           0 d (roundR y)
 lcdAffine _ = Nothing
 
-renderText :: Font -> String -> TextAttrs -> Affine -> Color -> IO (IO ())
+renderText :: Font -> Text -> TextAttrs -> Affine -> Color -> IO (IO ())
 renderText !font !str !attrs !tr !tintColor = do
     prepareText ftglFont str markup
     return $ void $ withTextBufferStr ftglFont markup str $ \textBuffer -> lift $ do
@@ -219,19 +220,19 @@ renderText !font !str !attrs !tr !tintColor = do
         markup = toMarkup tintColor attrs
 
 -- | @textBoundingBox font str@ is the pixel-bounding box around text in @text font str@.
-textBoundingBox :: Font -> String -> TextBuffer.BoundingBox
+textBoundingBox :: Font -> Text -> TextBuffer.BoundingBox
 textBoundingBox (Font font _) str =
     fst $ unsafePerformIO $ withTextBufferStr font Markup.def str $ \textBuffer ->
     TextBuffer.boundingBox textBuffer
 
 -- | @textBoundingWidth font str@ is the pixel-bounding width of the text in @text font str@.
-textBoundingWidth :: Font -> String -> R
+textBoundingWidth :: Font -> Text -> R
 textBoundingWidth font str =
     realToFrac $ TextBuffer.bbWidth $ textBoundingBox font str
 
 -- | @textAdvance font str@ is the x-advance of the text in
 -- @text font str@, i.e: where to place the next piece of text.
-textAdvance :: Font -> String -> R
+textAdvance :: Font -> Text -> R
 textAdvance (Font font _) str =
     realToFrac $ unsafePerformIO $ do
         ((), TextBuffer.Pen advanceX _advanceY) <-

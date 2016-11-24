@@ -4,7 +4,7 @@ Description:
     have to go into the deep, dark world of imperative stateful
     programming just to draw stuff.  It supports 2D only (for now),
     with support drawing geometry, images, and text.
-Version: 1.6
+Version: 1.7
 Stability: experimental
 Synopsis: A functional interface to 2D drawing in OpenGL
 License: BSD3
@@ -25,8 +25,9 @@ Library
                  , base == 4.*
                  , bitmap >= 0.0.2
                  , bitmap-opengl >= 0.0.1.5
-                 , freetype-gl >= 0.1
+                 , freetype-gl >= 0.2
                  , stb-image == 0.2.*
+                 , text
                  , transformers >= 0.4.2.0
     hs-Source-Dirs: src
     Exposed-Modules: Graphics.DrawingCombinators
