@@ -14,7 +14,7 @@ module Graphics.DrawingCombinators.Text
 import           Control.Concurrent (ThreadId, myThreadId)
 import           Control.Concurrent.MVar
 import qualified Control.Exception as Exception
-import           Control.Monad (void)
+import           Control.Monad (forM_, void)
 import           Control.Monad.Trans.Class (lift)
 import           Control.Monad.Trans.State (StateT(..))
 import           Data.IORef
@@ -22,27 +22,26 @@ import           Data.List (partition)
 import           Data.Text (Text)
 import           Graphics.DrawingCombinators.Affine
 import           Graphics.DrawingCombinators.Color
-import qualified Graphics.FreetypeGL.FontManager as FontManager
 import           Graphics.FreetypeGL.Init (initFreetypeGL)
 import           Graphics.FreetypeGL.Markup (Markup(..))
 import qualified Graphics.FreetypeGL.Markup as Markup
-import           Graphics.FreetypeGL.Mat4 (Mat4)
-import qualified Graphics.FreetypeGL.Mat4 as Mat4
-import           Graphics.FreetypeGL.RGBA (RGBA(..))
-import           Graphics.FreetypeGL.Shader (Shader)
-import qualified Graphics.FreetypeGL.Shader as Shader
+import           Graphics.FreetypeGL.Shaders (TextShaderProgram(..), TextShaderUniforms(..))
+import qualified Graphics.FreetypeGL.Shaders as Shaders
 import           Graphics.FreetypeGL.TextBuffer (TextBuffer, BoundingBox(..))
 import qualified Graphics.FreetypeGL.TextBuffer as TextBuffer
+import           Graphics.FreetypeGL.TextureAtlas (TextureAtlas)
 import qualified Graphics.FreetypeGL.TextureAtlas as TextureAtlas
 import           Graphics.FreetypeGL.TextureFont (TextureFont)
 import qualified Graphics.FreetypeGL.TextureFont as TextureFont
+import           Graphics.Rendering.OpenGL.GL (($=))
 import qualified Graphics.Rendering.OpenGL.GL as GL
 import           System.IO.Unsafe (unsafePerformIO) -- for pure text metrics
 
 data FTGLFont = FTGLFont
     { _getTextureFont :: !TextureFont
-    , getTextBuffer :: !(MVar TextBuffer)
-    , getShader :: !Shader
+    , _getTextBuffer :: !(MVar TextBuffer)
+    , getShaders :: ![TextShaderProgram]
+    , getAtlas :: !TextureAtlas
     }
 
 data Font = Font
@@ -70,27 +69,32 @@ queueGlResourceCleanup tid act =
     \queue -> ((tid, act) : queue, ())
 
 -- | Load a TTF font from a file. This is CPS'd to take care of finalization
-newFTGLFont :: Shader -> TextBuffer.RenderDepth -> Float -> FilePath -> IO FTGLFont
-newFTGLFont shader renderDepth size path =
+newFTGLFont ::
+    [TextShaderProgram] -> TextureAtlas.RenderDepth -> Float -> FilePath ->
+    IO FTGLFont
+newFTGLFont shaders renderDepth size path =
     Exception.mask_ $
     do
-        textBuffer <- TextBuffer.new renderDepth shader
-        manager <- TextBuffer.getFontManager textBuffer
-        font <- FontManager.getFromFileName manager path size
+        atlas <- TextureAtlas.new 512 512 renderDepth
+        font <- TextureFont.newFromFile atlas size TextureFont.RenderNormal path
+        textBuffer <- TextBuffer.new
         mvar <- newMVar textBuffer
         tid <- myThreadId
         _ <-
             mkWeakMVar mvar
             (queueGlResourceCleanup tid (TextBuffer.delete textBuffer))
-        return (FTGLFont font mvar shader)
+        return (FTGLFont font mvar shaders atlas)
 
 openFont :: Float -> FilePath -> IO Font
 openFont size path =
     do
         initFreetypeGL
-        shader <- Shader.newTextShader
-        lcdFont <- newFTGLFont shader TextBuffer.LCD_FILTERING_ON size path
-        scaledFont <- newFTGLFont shader TextBuffer.LCD_FILTERING_OFF size path
+        lcdShaders <- Shaders.lcdShaders
+        shader <- Shaders.normalShader
+        lcdFont <-
+            newFTGLFont
+            [Shaders.textLcdPassA lcdShaders, Shaders.textLcdPassB lcdShaders] TextureAtlas.LCD_FILTERING_ON size path
+        scaledFont <- newFTGLFont [shader] TextureAtlas.LCD_FILTERING_OFF size path
         return (Font lcdFont scaledFont)
 
 data TextAttrs = TextAttrs
@@ -128,7 +132,7 @@ withTextBufferStr ::
     FTGLFont -> Markup -> Text ->
     (TextBuffer -> StateT TextBuffer.Pen IO a) ->
     IO (a, TextBuffer.Pen)
-withTextBufferStr (FTGLFont font mvarTextBuffer _) markup str act =
+withTextBufferStr (FTGLFont font mvarTextBuffer _ _) markup str act =
     str `seq` withMVar mvarTextBuffer $ \textBuffer -> do
         h <- TextureFont.height font
         d <- TextureFont.descender font
@@ -139,7 +143,8 @@ withTextBufferStr (FTGLFont font mvarTextBuffer _) markup str act =
                 act textBuffer
 
 textMetric :: (TextureFont -> IO Float) -> Font -> R
-textMetric f (Font (FTGLFont font _ _) _) = realToFrac . unsafePerformIO $ f font
+textMetric f (Font lcdFont _) =
+    realToFrac . unsafePerformIO . f $ _getTextureFont lcdFont
 
 fontHeight :: Font -> R
 fontHeight = textMetric TextureFont.height
@@ -153,24 +158,26 @@ fontDescender = textMetric TextureFont.descender
 fontAscender :: Font -> R
 fontAscender = textMetric TextureFont.ascender
 
-getMatrix :: Maybe GL.MatrixMode -> IO Mat4
-getMatrix mode = do
-    matrix <- GL.get (GL.matrix mode)
-    components <- GL.getMatrixComponents GL.ColumnMajor (matrix :: GL.GLmatrix Float)
-    return $ Mat4.fromList16 $ map realToFrac components
+getMatrix :: Maybe GL.MatrixMode -> IO (GL.GLmatrix GL.GLfloat)
+getMatrix mode = GL.get (GL.matrix mode)
 
 -- Add everything to the text buffers' atlases before rendering anything:
 prepareText :: FTGLFont -> Text -> Markup -> IO ()
 prepareText font str markup =
     void $ withTextBufferStr font markup str $ \_textBuffer -> return ()
 
-bindTextShaderUniforms :: Affine -> Shader -> Mat4 -> Mat4 -> IO ()
+bindTextShaderUniforms ::
+    Affine -> TextShaderProgram ->
+    GL.GLmatrix GL.GLfloat -> GL.GLmatrix GL.GLfloat ->
+    IO ()
 bindTextShaderUniforms tr shader modelview projection =
-    Shader.bindTextShaderUniforms shader Shader.TextShaderUniforms
-    { Shader.textShaderModel = asMat4 tr
-    , Shader.textShaderView = modelview
-    , Shader.textShaderProjection = projection
-    }
+    do
+        GL.currentProgram $= Just (shaderProgram shader)
+        let uniforms = shaderUniforms shader
+        model <- toGLmatrix tr :: IO (GL.GLmatrix GL.GLfloat)
+        GL.uniform (uniformModel uniforms) $= model
+        GL.uniform (uniformView uniforms) $= modelview
+        GL.uniform (uniformProjection uniforms) $= projection
 
 roundR :: R -> R
 roundR x = fromIntegral (round x :: Integer)
@@ -202,10 +209,12 @@ renderText :: Font -> Text -> TextAttrs -> Affine -> Color -> IO (IO ())
 renderText !font !str !attrs !tr !tintColor = do
     prepareText ftglFont str markup
     return $ void $ withTextBufferStr ftglFont markup str $ \textBuffer -> lift $ do
+        TextureAtlas.uploadIfNeeded atlas
         projection <- getMatrix (Just GL.Projection)
         modelview <- getMatrix (Just (GL.Modelview 0))
-        bindTextShaderUniforms tr' (getShader ftglFont) modelview projection
-        TextBuffer.render textBuffer
+        forM_ shaders $ \shader -> do
+            bindTextShaderUniforms tr' shader modelview projection
+            TextBuffer.render shader atlas textBuffer
     where
         (tr', ftglFont) =
             case lcdAffine tr of
@@ -218,6 +227,8 @@ renderText !font !str !attrs !tr !tintColor = do
                 -- pixel and we can use prettier LCD rendering:
                 (lcdTr, getLCDFont font)
         markup = toMarkup tintColor attrs
+        shaders = getShaders ftglFont
+        atlas = getAtlas ftglFont
 
 -- | @textBoundingBox font str@ is the pixel-bounding box around text in @text font str@.
 textBoundingBox :: Font -> Text -> TextBuffer.BoundingBox
