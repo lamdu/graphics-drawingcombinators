@@ -1,7 +1,10 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 import Control.Applicative
 import Control.Monad
 import Data.IORef
 import Data.Monoid
+import Data.Text (Text)
 import Graphics.DrawingCombinators ((%%))
 import qualified Graphics.DrawingCombinators             as Draw
 import qualified Graphics.UI.GLFW                        as GLFW
@@ -30,11 +33,11 @@ initScreen = do
 square :: Draw.Image Any
 square = Draw.convexPoly [ (-1, 1), (1, 1), (1, -1), (-1, -1) ]
 
-unitText :: Draw.Font -> String -> Draw.Image Any
-unitText font str =
+unitText :: Draw.Font -> Text -> Draw.Image Any
+unitText font txt =
     mconcat
     [ Draw.translate (-1,0) <> Draw.scale s s %%
-      Draw.text font str attrs
+      Draw.text font txt attrs
     , Draw.tint (Draw.Color 0 0.6 0 0.5) $
       Draw.scale 1 (h / w) <> Draw.translate (0, 0.5) %%
       square
@@ -43,7 +46,7 @@ unitText font str =
         attrs = Draw.defTextAttrs { Draw.mUnderline = Just (Draw.Color 1 0 0 1) }
         h = Draw.fontHeight font
         s = 2 / w
-        w = Draw.textBoundingWidth font str
+        w = Draw.textBoundingWidth font txt
 
 quadrants :: (Monoid a) => Draw.Image a -> Draw.Image a
 quadrants img = mconcat [
@@ -57,10 +60,10 @@ fromAny :: Alternative f => a -> Any -> f a
 fromAny _ (Any False) = empty
 fromAny msg (Any True) = pure msg
 
-circleText :: Draw.Font -> String -> Draw.Image [String]
-circleText font str =
+circleText :: Draw.Font -> Text -> Draw.Image [Text]
+circleText font txt =
   mconcat
-  [ fromAny str <$> unitText font str
+  [ fromAny txt <$> unitText font txt
   , fromAny "circle" <$> Draw.tint (Draw.Color 0 0 1 0.5) Draw.circle
   ]
 
