@@ -82,7 +82,7 @@ module Graphics.DrawingCombinators
 where
 
 import qualified Codec.Image.STB as Image
-import           Control.Applicative (Applicative(..), liftA2, (<$>), (<$))
+import           Control.Applicative (Applicative(..), liftA2, (<$>))
 import           Control.Monad (join)
 import qualified Data.Bitmap.OpenGL as Bitmap
 import           Data.Monoid (Monoid(..), Any(..))

@@ -12,12 +12,11 @@ module Graphics.DrawingCombinators.Affine
     ( R, R2, Affine(..)
     , compose, apply, identity
     , translate, rotate, scale, inverse
-    , asMat4, multGLmatrix, withMultGLmatrix
+    , toGLmatrix, multGLmatrix, withMultGLmatrix
     )
 where
 
 -- import           Data.Monoid
-import           Graphics.FreetypeGL.Mat4 (Mat4(..))
 import qualified Graphics.Rendering.OpenGL.GL as GL
 
 type R = GL.GLdouble
@@ -83,24 +82,25 @@ scale :: R -> R -> Affine
 scale x y = M x 0 0
               0 y 0
 
-asMat4 :: Affine -> Mat4
-asMat4 (M x11 x12 x13 x21 x22 x23) =
-    Mat4 (f x11) (f x21) (f 0) (f 0)
-         (f x12) (f x22) (f 0) (f 0)
-         (f   0) (f   0) (f 1) (f 0)
-         (f x13) (f x23) (f 0) (f 1)
+toGLmatrix ::
+    (Fractional a, GL.MatrixComponent a) => Affine -> IO (GL.GLmatrix a)
+toGLmatrix (M x11 x12 x13 x21 x22 x23) =
+    GL.newMatrix GL.ColumnMajor
+    [ f x11 , f x21 , 0 , 0
+    , f x12 , f x22 , 0 , 0
+    , f 0   , 0     , 1 , 0
+    , f x13 , f x23 , 0 , 1
+    ]
     where
         f = realToFrac
 
 -- | Multiply this Affine by the top of the OpenGL matrix stack.
 -- Don't mind this, it\'s an implementation detail.
 multGLmatrix :: Affine -> IO ()
-multGLmatrix (M x11 x12 x13 x21 x22 x23) = do
-    m <- GL.newMatrix GL.ColumnMajor [ x11 , x21 , 0 , 0
-                                     , x12 , x22 , 0 , 0
-                                     , 0   , 0   , 1 , 0
-                                     , x13 , x23 , 0 , 1 ]
-    GL.multMatrix (m :: GL.GLmatrix R)
+multGLmatrix affine =
+    do
+        m <- toGLmatrix affine
+        GL.multMatrix (m :: GL.GLmatrix R)
 
 withMultGLmatrix :: Affine -> IO a -> IO a
 withMultGLmatrix m f = GL.preservingMatrix $ multGLmatrix m >> f
