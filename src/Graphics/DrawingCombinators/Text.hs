@@ -17,6 +17,7 @@ import qualified Control.Exception as Exception
 import           Control.Monad (forM_, void)
 import           Control.Monad.Trans.Class (lift)
 import           Control.Monad.Trans.State (StateT(..))
+import           Data.Foldable (traverse_)
 import           Data.IORef
 import           Data.List (partition)
 import           Data.Text (Text)
@@ -40,7 +41,7 @@ import           System.IO.Unsafe (unsafePerformIO) -- for pure text metrics
 data FTGLFont = FTGLFont
     { _getTextureFont :: !TextureFont
     , _getTextBuffer :: !(MVar TextBuffer)
-    , getShaders :: ![TextShaderProgram]
+    , getShaders :: IO [TextShaderProgram]
     , getAtlas :: !TextureAtlas
     }
 
@@ -70,31 +71,43 @@ queueGlResourceCleanup tid act =
 
 -- | Load a TTF font from a file. This is CPS'd to take care of finalization
 newFTGLFont ::
-    [TextShaderProgram] -> TextureAtlas.RenderDepth -> Float -> FilePath ->
+    IO [TextShaderProgram] -> TextureAtlas.RenderDepth -> Float -> FilePath ->
     IO FTGLFont
-newFTGLFont shaders renderDepth size path =
+newFTGLFont loadShaders renderDepth size path =
     Exception.mask_ $
     do
         atlas <- TextureAtlas.new 512 512 renderDepth
         font <- TextureFont.newFromFile atlas size TextureFont.RenderNormal path
         textBuffer <- TextBuffer.new
         mvar <- newMVar textBuffer
+        shadersRef <- newIORef Nothing
+        let getShaders =
+                do
+                    mShaders <- readIORef shadersRef
+                    case mShaders of
+                        Just shaders -> return shaders
+                        Nothing ->
+                            do
+                                shaders <- loadShaders
+                                writeIORef shadersRef (Just shaders)
+                                return shaders
         tid <- myThreadId
         _ <-
-            mkWeakMVar mvar
-            (queueGlResourceCleanup tid (TextBuffer.delete textBuffer))
-        return (FTGLFont font mvar shaders atlas)
+            mkWeakMVar mvar $ queueGlResourceCleanup tid $
+            do
+                TextBuffer.delete textBuffer
+                TextureAtlas.delete atlas
+                readIORef shadersRef
+                    >>= traverse_
+                        (mapM_ (GL.deleteObjectName . Shaders.shaderProgram))
+        return (FTGLFont font mvar getShaders atlas)
 
 openFont :: Float -> FilePath -> IO Font
 openFont size path =
     do
         initFreetypeGL
-        lcdShaders <- Shaders.lcdShaders
-        shader <- Shaders.normalShader
-        lcdFont <-
-            newFTGLFont
-            [Shaders.textLcdPassA lcdShaders, Shaders.textLcdPassB lcdShaders] TextureAtlas.LCD_FILTERING_ON size path
-        scaledFont <- newFTGLFont [shader] TextureAtlas.LCD_FILTERING_OFF size path
+        lcdFont <- newFTGLFont Shaders.lcdShaders TextureAtlas.LCD_FILTERING_ON size path
+        scaledFont <- newFTGLFont (return <$> Shaders.normalShader) TextureAtlas.LCD_FILTERING_OFF size path
         return (Font lcdFont scaledFont)
 
 data TextAttrs = TextAttrs
@@ -212,6 +225,7 @@ renderText !font !str !attrs !tr !tintColor = do
         TextureAtlas.uploadIfNeeded atlas
         projection <- getMatrix (Just GL.Projection)
         modelview <- getMatrix (Just (GL.Modelview 0))
+        shaders <- getShaders ftglFont
         forM_ shaders $ \shader -> do
             bindTextShaderUniforms tr' shader modelview projection
             TextBuffer.render shader atlas textBuffer
@@ -227,7 +241,6 @@ renderText !font !str !attrs !tr !tintColor = do
                 -- pixel and we can use prettier LCD rendering:
                 (lcdTr, getLCDFont font)
         markup = toMarkup tintColor attrs
-        shaders = getShaders ftglFont
         atlas = getAtlas ftglFont
 
 -- | @textBoundingBox font str@ is the pixel-bounding box around text in @text font str@.
