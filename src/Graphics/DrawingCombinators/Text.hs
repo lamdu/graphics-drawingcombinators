@@ -96,6 +96,7 @@ newFTGLFont loadShaders renderDepth size path =
             mkWeakMVar mvar $ queueGlResourceCleanup tid $
             do
                 TextBuffer.delete textBuffer
+                TextureFont.delete font
                 TextureAtlas.delete atlas
                 readIORef shadersRef
                     >>= traverse_
