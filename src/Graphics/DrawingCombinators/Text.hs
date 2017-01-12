@@ -81,7 +81,7 @@ newFTGLFont loadShaders renderDepth size path =
         textBuffer <- TextBuffer.new
         mvar <- newMVar textBuffer
         shadersRef <- newIORef Nothing
-        let getShaders =
+        let getShade =
                 do
                     mShaders <- readIORef shadersRef
                     case mShaders of
@@ -100,7 +100,7 @@ newFTGLFont loadShaders renderDepth size path =
                 readIORef shadersRef
                     >>= traverse_
                         (mapM_ (GL.deleteObjectName . Shaders.shaderProgram))
-        return (FTGLFont font mvar getShaders atlas)
+        return (FTGLFont font mvar getShade atlas)
 
 openFont :: Float -> FilePath -> IO Font
 openFont size path =
