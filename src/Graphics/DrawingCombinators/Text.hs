@@ -23,7 +23,6 @@ import           Data.List (partition)
 import           Data.Text (Text)
 import           Graphics.DrawingCombinators.Affine
 import           Graphics.DrawingCombinators.Color
-import           Graphics.FreetypeGL.Init (initFreetypeGL)
 import           Graphics.FreetypeGL.Markup (Markup(..))
 import qualified Graphics.FreetypeGL.Markup as Markup
 import           Graphics.FreetypeGL.Shaders (TextShaderProgram(..), TextShaderUniforms(..))
@@ -106,7 +105,6 @@ newFTGLFont loadShaders renderDepth size path =
 openFont :: Float -> FilePath -> IO Font
 openFont size path =
     do
-        initFreetypeGL
         lcdFont <- newFTGLFont Shaders.lcdShaders TextureAtlas.LCD_FILTERING_ON size path
         scaledFont <- newFTGLFont (return <$> Shaders.normalShader) TextureAtlas.LCD_FILTERING_OFF size path
         return (Font lcdFont scaledFont)

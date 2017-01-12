@@ -90,6 +90,7 @@ import           Data.Text (Text)
 import           Graphics.DrawingCombinators.Affine
 import           Graphics.DrawingCombinators.Color
 import           Graphics.DrawingCombinators.Text
+import           Graphics.FreetypeGL.Init (initFreetypeGL)
 import qualified Graphics.Rendering.OpenGL.GL as GL
 
 type Picker a = R2 -> a
@@ -132,6 +133,7 @@ instance (Monoid m) => Monoid (Image m) where
 -- lower left and (1,1) in the upper right).
 render :: Image a -> IO ()
 render d = GL.preservingAttrib [GL.AllServerAttributes] $ do
+    initFreetypeGL
     cleanQueuedGlResources
     GL.blend GL.$= GL.Enabled
     GL.blendFunc GL.$= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
