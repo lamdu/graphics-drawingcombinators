@@ -2,7 +2,7 @@
 -- | Text-rendering and fonts component of Drawing Combinators
 
 module Graphics.DrawingCombinators.Text
-    ( Font, openFont
+    ( Font, openFont, openFontNoLCD
     , fontAscender, fontDescender, fontHeight, fontLineGap
     , textAdvance
     , BoundingBox(..), textBoundingBox, textBoundingWidth
@@ -108,6 +108,12 @@ openFont size path =
         lcdFont <- newFTGLFont Shaders.lcdShaders TextureAtlas.LCD_FILTERING_ON size path
         scaledFont <- newFTGLFont (return <$> Shaders.normalShader) TextureAtlas.LCD_FILTERING_OFF size path
         return (Font lcdFont scaledFont)
+
+openFontNoLCD :: Float -> FilePath -> IO Font
+openFontNoLCD size path =
+    do
+        font <- newFTGLFont (return <$> Shaders.normalShader) TextureAtlas.LCD_FILTERING_OFF size path
+        return (Font font font)
 
 data TextAttrs = TextAttrs
     { spacing :: !Float

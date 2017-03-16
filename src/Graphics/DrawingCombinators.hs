@@ -69,7 +69,7 @@ module Graphics.DrawingCombinators
     -- * Sprites (images from files)
     , Sprite, openSprite, sprite
     -- * Text
-    , Font, openFont
+    , Font, openFont, openFontNoLCD
     , fontDescender, fontAscender, fontHeight, fontLineGap
     , TextAttrs(..), defTextAttrs
     , text
