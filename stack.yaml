@@ -10,7 +10,7 @@ packages:
   extra-dep: True
 - location:
     git: https://github.com/lamdu/FreetypeGL
-    commit: 5b6a25170db18867aea12b9eb624e1e1a9b1d0cb
+    commit: 286b75894e51b08b7c63f8845f045f66d27e9849
   extra-dep: True
 extra-deps:
 - bitmap-0.0.2
