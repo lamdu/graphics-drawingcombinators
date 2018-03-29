@@ -19,7 +19,6 @@ import           Control.Monad.Trans.Class (lift)
 import           Control.Monad.Trans.State (StateT(..))
 import           Data.Foldable (traverse_)
 import           Data.IORef
-import           Data.List (partition)
 import           Data.Text (Text)
 import           Graphics.DrawingCombinators.Affine
 import           Graphics.DrawingCombinators.Color
@@ -58,9 +57,13 @@ glResourceCleanupQueue = unsafePerformIO (newIORef [])
 cleanQueuedGlResources :: IO ()
 cleanQueuedGlResources =
     do
-        tid <- myThreadId
+        -- TODO: tid <- myThreadId
         Exception.mask_ $
-            atomicModifyIORef glResourceCleanupQueue (partition ((/= tid) . fst))
+            -- TODO: To support multiple contexts, need to only handle
+            -- cleanups of the correct thread.  Using the drawing
+            -- combinators only from the correct thread is difficult,
+            -- so for now just perform all the cleanups.
+            atomicModifyIORef glResourceCleanupQueue ((,) [])
             >>= mapM_ snd
 
 queueGlResourceCleanup :: ThreadId -> IO () -> IO ()
