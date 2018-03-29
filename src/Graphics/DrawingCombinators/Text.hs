@@ -11,8 +11,9 @@ module Graphics.DrawingCombinators.Text
     , cleanQueuedGlResources
     ) where
 
-import           Control.Concurrent (ThreadId, myThreadId)
+import           Control.Concurrent (ThreadId, myThreadId, isCurrentThreadBound, rtsSupportsBoundThreads)
 import           Control.Concurrent.MVar
+import           Control.Exception (Exception)
 import qualified Control.Exception as Exception
 import           Control.Monad (forM_, void)
 import           Control.Monad.Trans.Class (lift)
@@ -45,8 +46,9 @@ data FTGLFont = FTGLFont
     }
 
 data Font = Font
-    { getLCDFont :: !FTGLFont
-    , getScaledFont :: !FTGLFont
+    { fontLCD :: !FTGLFont
+    , fontScaled :: !FTGLFont
+    , fontTid :: ThreadId
     }
 
 type CleanupAction = (ThreadId, IO ())
@@ -55,10 +57,26 @@ type CleanupAction = (ThreadId, IO ())
 glResourceCleanupQueue :: IORef [CleanupAction]
 glResourceCleanupQueue = unsafePerformIO (newIORef [])
 
+data ThreadViolation = ThreadViolation String
+    deriving (Show)
+instance Exception ThreadViolation
+
+threadValidate :: Bool -> String -> IO ()
+threadValidate False msg
+    | rtsSupportsBoundThreads = Exception.throwIO $ ThreadViolation msg
+threadValidate _ _ = pure ()
+
+getCurrentBoundThread :: String -> IO ThreadId
+getCurrentBoundThread msg =
+    do
+        b <- isCurrentThreadBound
+        threadValidate b $ "Must call" ++ show msg ++ " in a bound thread"
+        myThreadId
+
 cleanQueuedGlResources :: IO ()
 cleanQueuedGlResources =
     do
-        tid <- myThreadId
+        tid <- getCurrentBoundThread "render"
         Exception.mask_ $
             atomicModifyIORef glResourceCleanupQueue (partition ((/= tid) . fst))
             >>= mapM_ snd
@@ -107,13 +125,15 @@ openFont size path =
     do
         lcdFont <- newFTGLFont Shaders.lcdShaders TextureAtlas.LCD_FILTERING_ON size path
         scaledFont <- newFTGLFont (return <$> Shaders.normalShader) TextureAtlas.LCD_FILTERING_OFF size path
-        return (Font lcdFont scaledFont)
+        tid <- getCurrentBoundThread "openFont"
+        return (Font lcdFont scaledFont tid)
 
 openFontNoLCD :: Float -> FilePath -> IO Font
 openFontNoLCD size path =
     do
         font <- newFTGLFont (return <$> Shaders.normalShader) TextureAtlas.LCD_FILTERING_OFF size path
-        return (Font font font)
+        tid <- getCurrentBoundThread "openFontNoLCD"
+        return (Font font font tid)
 
 data TextAttrs = TextAttrs
     { spacing :: !Float
@@ -161,8 +181,8 @@ withTextBufferStr (FTGLFont font mvarTextBuffer _ _) markup str act =
                 act textBuffer
 
 textMetric :: (TextureFont -> IO Float) -> Font -> R
-textMetric f (Font lcdFont _) =
-    realToFrac . unsafePerformIO . f $ _getTextureFont lcdFont
+textMetric f font =
+    realToFrac . unsafePerformIO . f . _getTextureFont $ fontLCD font
 
 fontHeight :: Font -> R
 fontHeight = textMetric TextureFont.height
@@ -225,6 +245,10 @@ lcdAffine _ = Nothing
 
 renderText :: Font -> Text -> TextAttrs -> Affine -> Color -> IO (IO ())
 renderText !font !str !attrs !tr !tintColor = do
+    tid <- getCurrentBoundThread "font rendering"
+    threadValidate (tid == fontTid font)
+        ("Font used in " ++ show tid ++ " but created in " ++ show (fontTid font))
+    let atlas = getAtlas ftglFont
     prepareText ftglFont str markup
     return $ void $ withTextBufferStr ftglFont markup str $ \textBuffer -> lift $ do
         TextureAtlas.uploadIfNeeded atlas
@@ -240,19 +264,19 @@ renderText !font !str !attrs !tr !tintColor = do
             Nothing ->
                 -- Font is not just translated, use the scaleFont to
                 -- render
-                (tr, getScaledFont font)
+                (tr, fontScaled font)
             Just lcdTr ->
                 -- Font is just translated, we need to round to a
                 -- pixel and we can use prettier LCD rendering:
-                (lcdTr, getLCDFont font)
+                (lcdTr, fontLCD font)
         markup = toMarkup tintColor attrs
-        atlas = getAtlas ftglFont
 
 -- | @textBoundingBox font str@ is the pixel-bounding box around text in @text font str@.
 textBoundingBox :: Font -> Text -> TextBuffer.BoundingBox
-textBoundingBox (Font font _) str =
-    fst $ unsafePerformIO $ withTextBufferStr font Markup.def str $ \textBuffer ->
-    TextBuffer.boundingBox textBuffer
+textBoundingBox font str =
+    fst $ unsafePerformIO $
+    withTextBufferStr (fontLCD font) Markup.def str $
+    \textBuffer -> TextBuffer.boundingBox textBuffer
 
 -- | @textBoundingWidth font str@ is the pixel-bounding width of the text in @text font str@.
 textBoundingWidth :: Font -> Text -> R
@@ -262,8 +286,9 @@ textBoundingWidth font str =
 -- | @textAdvance font str@ is the x-advance of the text in
 -- @text font str@, i.e: where to place the next piece of text.
 textAdvance :: Font -> Text -> R
-textAdvance (Font font _) str =
-    realToFrac $ unsafePerformIO $ do
+textAdvance font str =
+    realToFrac $ unsafePerformIO $
+    do
         ((), TextBuffer.Pen advanceX _advanceY) <-
-            withTextBufferStr font Markup.def str $ \_ -> return ()
+            withTextBufferStr (fontLCD font) Markup.def str $ \_ -> return ()
         return advanceX
