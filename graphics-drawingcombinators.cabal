@@ -35,7 +35,7 @@ Library
                    , Graphics.DrawingCombinators.Affine
     Other-Modules:   Graphics.DrawingCombinators.Text
     ghc-options: -Wall
-    Ghc-Prof-Options:  -prof -auto-all
+    Ghc-Prof-Options: -fprof-auto
 
 Flag examples
   Description: Build example programs
