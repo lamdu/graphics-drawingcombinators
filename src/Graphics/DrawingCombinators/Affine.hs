@@ -16,7 +16,7 @@ module Graphics.DrawingCombinators.Affine
     )
 where
 
--- import           Data.Monoid
+import           Data.Semigroup (Semigroup(..))
 import qualified Graphics.Rendering.OpenGL.GL as GL
 
 type R = GL.GLdouble
@@ -33,9 +33,12 @@ data Affine = M !R !R !R
 instance Show Affine where
     show (M a b c d e f) = show [[a,b,c],[d,e,f]]
 
+instance Semigroup Affine where
+    (<>) = compose
+
 instance Monoid Affine where
     mempty = identity
-    mappend = compose
+    mappend = (<>)
 
 -- | > [[compose a b]] = [[a]] . [[b]]
 compose :: Affine -> Affine -> Affine

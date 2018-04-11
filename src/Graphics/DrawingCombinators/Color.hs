@@ -2,6 +2,7 @@
 
 module Graphics.DrawingCombinators.Color (Color(..), white, modulate) where
 
+import Data.Semigroup (Semigroup(..))
 import Graphics.DrawingCombinators.Affine
 
 -- | Color is defined in the usual computer graphics sense:
@@ -17,13 +18,16 @@ import Graphics.DrawingCombinators.Affine
 data Color = Color !R !R !R !R
     deriving (Eq,Show)
 
-instance Monoid Color where
-    mempty = Color 0 0 0 0
-    mappend (Color r g b a) (Color r' g' b' a') = Color (i r r') (i g g') (i b b') γ
+instance Semigroup Color where
+    Color r g b a <> Color r' g' b' a' = Color (i r r') (i g g') (i b b') γ
         where
         γ = a + a' - a * a'
         i | γ == 0    = \_ _ -> 0  -- imples a = a' = 0
           | otherwise = \x y -> (a*x + (1-a)*a'*y)/γ
+
+instance Monoid Color where
+    mempty = Color 0 0 0 0
+    mappend = (<>)
 
 white :: Color
 white = Color 1 1 1 1
