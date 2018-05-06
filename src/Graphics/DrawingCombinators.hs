@@ -86,6 +86,7 @@ import           Control.Applicative (Applicative(..), liftA2, (<$>))
 import           Control.Monad (join)
 import qualified Data.Bitmap.OpenGL as Bitmap
 import           Data.Monoid (Monoid(..), Any(..))
+import           Data.Semigroup (Semigroup(..))
 import           Data.Text (Text)
 import           Graphics.DrawingCombinators.Affine
 import           Graphics.DrawingCombinators.Color
@@ -124,7 +125,10 @@ instance Applicative Image where
         dPick = dPick df <*> dPick dx
       }
 
-instance (Monoid m) => Monoid (Image m) where
+instance Semigroup m => Semigroup (Image m) where
+    (<>) = liftA2 (<>)
+
+instance Monoid m => Monoid (Image m) where
     mempty = pure mempty
     mappend = liftA2 mappend
 
