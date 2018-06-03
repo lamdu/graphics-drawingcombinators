@@ -83,8 +83,9 @@ where
 
 import qualified Codec.Image.STB as Image
 import           Control.Applicative (Applicative(..), liftA2, (<$>))
-import           Control.Monad (join)
+import           Control.Monad (join, unless)
 import qualified Data.Bitmap.OpenGL as Bitmap
+import           Data.IORef (newIORef, atomicModifyIORef)
 import           Data.Monoid (Monoid(..), Any(..))
 import           Data.Semigroup (Semigroup(..))
 import           Data.Text (Text)
@@ -93,6 +94,7 @@ import           Graphics.DrawingCombinators.Color
 import           Graphics.DrawingCombinators.Text
 import           Graphics.FreetypeGL.Init (initFreetypeGL)
 import qualified Graphics.Rendering.OpenGL.GL as GL
+import           System.IO.Unsafe (unsafePerformIO)
 
 type Picker a = R2 -> a
 
@@ -132,12 +134,21 @@ instance Monoid m => Monoid (Image m) where
     mempty = pure mempty
     mappend = liftA2 mappend
 
+maybeInitFreetypeGL :: IO ()
+maybeInitFreetypeGL =
+    do
+        isInited <- atomicModifyIORef isInitedRef ((,) True)
+        unless isInited $ initFreetypeGL
+    where
+        {-# NOINLINE isInitedRef #-}
+        isInitedRef = unsafePerformIO (newIORef False)
+
 -- |Draw an Image on the screen in the current OpenGL coordinate
 -- system (which, in absense of information, is (-1,-1) in the
 -- lower left and (1,1) in the upper right).
 render :: Image a -> IO ()
 render d = GL.preservingAttrib [GL.AllServerAttributes] $ do
-    initFreetypeGL
+    maybeInitFreetypeGL
     cleanQueuedGlResources
     GL.blend GL.$= GL.Enabled
     GL.blendFunc GL.$= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
