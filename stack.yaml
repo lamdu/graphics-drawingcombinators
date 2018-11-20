@@ -2,15 +2,15 @@ packages:
 - '.'
 - location:
     git: https://github.com/lamdu/freetype2
-    commit: 71941659a29fe353bf975aefeb1805417c8ab364
+    commit: 046328d92312d65638440132c016a3081d9c32a4
   extra-dep: True
 - location:
     git: https://github.com/lamdu/bindings-freetype-gl
-    commit: 120cfe88435a9052e3eedf1af2f281a9607bc270
+    commit: c720425fc6ec3b68adfb7b25221723bab9520a9c
   extra-dep: True
 - location:
     git: https://github.com/lamdu/FreetypeGL
-    commit: 286b75894e51b08b7c63f8845f045f66d27e9849
+    commit: d2312f89cdf1412d584d13cda235ef683fa9c832
   extra-dep: True
 extra-deps:
 - bitmap-0.0.2
@@ -21,4 +21,4 @@ extra-include-dirs:
 - /usr/local/include
 extra-lib-dirs:
 - /usr/local/lib
-resolver: lts-7.14
+resolver: nightly-2018-11-15
