@@ -1,2 +1,4 @@
 :set -isrc
 :set -Wall
+:set -odir=ghci-out
+:set -outputdir=ghci-out

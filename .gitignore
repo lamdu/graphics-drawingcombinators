@@ -1,5 +1,6 @@
 /dist
 /.stack-work/
 /.dir-locals.el
+/ghci-out
 *.i_hi
 *.i_o
