@@ -5,27 +5,23 @@ module Graphics.DrawingCombinators.Cleanup
     , queueGlResourceCleanup
     ) where
 
-import           Control.Concurrent (ThreadId, myThreadId)
 import qualified Control.Exception as Exception
+import           Control.Monad (join)
 import           Data.IORef
-import           Data.List (partition)
 import           System.IO.Unsafe (unsafePerformIO)
 
-type CleanupAction = (ThreadId, IO ())
+type CleanupAction = IO ()
 
 {-# NOINLINE glResourceCleanupQueue #-}
-glResourceCleanupQueue :: IORef [CleanupAction]
-glResourceCleanupQueue = unsafePerformIO (newIORef [])
+glResourceCleanupQueue :: IORef CleanupAction
+glResourceCleanupQueue = unsafePerformIO (newIORef (pure ()))
 
 cleanQueuedGlResources :: IO ()
 cleanQueuedGlResources =
-    do
-        tid <- myThreadId
-        Exception.mask_ $
-            atomicModifyIORef glResourceCleanupQueue (partition ((/= tid) . fst))
-            >>= mapM_ snd
+    Exception.mask_ $ join $
+    atomicModifyIORef glResourceCleanupQueue (\act -> (pure (), act))
 
-queueGlResourceCleanup :: ThreadId -> IO () -> IO ()
-queueGlResourceCleanup tid act =
+queueGlResourceCleanup :: CleanupAction -> IO ()
+queueGlResourceCleanup act =
     atomicModifyIORef glResourceCleanupQueue $
-    \queue -> ((tid, act) : queue, ())
+    \queue -> (act *> queue, ())

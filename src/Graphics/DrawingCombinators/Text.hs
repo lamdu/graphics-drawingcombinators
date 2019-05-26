@@ -10,7 +10,6 @@ module Graphics.DrawingCombinators.Text
     , TextAttrs(..), defTextAttrs
     ) where
 
-import           Control.Concurrent (myThreadId)
 import           Control.Concurrent.MVar
 import qualified Control.Exception as Exception
 import           Control.Monad (forM_, void)
@@ -70,9 +69,8 @@ newFTGLFont loadShaders renderDepth size path =
                                 shaders <- loadShaders
                                 writeIORef shadersRef (Just shaders)
                                 return shaders
-        tid <- myThreadId
         _ <-
-            mkWeakMVar mvar $ queueGlResourceCleanup tid $
+            mkWeakMVar mvar $ queueGlResourceCleanup $
             do
                 TextBuffer.delete textBuffer
                 TextureFont.delete font
