@@ -92,6 +92,7 @@ import           Data.Text (Text)
 import           Graphics.DrawingCombinators.Affine
 import           Graphics.DrawingCombinators.Color
 import           Graphics.DrawingCombinators.Text
+import           Graphics.DrawingCombinators.Cleanup (cleanQueuedGlResources)
 import           Graphics.FreetypeGL.Init (initFreetypeGL)
 import qualified Graphics.Rendering.OpenGL.GL as GL
 import           System.IO.Unsafe (unsafePerformIO)

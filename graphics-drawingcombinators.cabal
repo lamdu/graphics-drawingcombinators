@@ -34,6 +34,7 @@ Library
                    , Graphics.DrawingCombinators.Color
                    , Graphics.DrawingCombinators.Affine
     Other-Modules:   Graphics.DrawingCombinators.Text
+                   , Graphics.DrawingCombinators.Cleanup
     ghc-options: -Wall
     Ghc-Prof-Options: -fprof-auto
 

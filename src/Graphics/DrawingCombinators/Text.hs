@@ -8,10 +8,9 @@ module Graphics.DrawingCombinators.Text
     , BoundingBox(..), textBoundingBox, textBoundingWidth
     , renderText
     , TextAttrs(..), defTextAttrs
-    , cleanQueuedGlResources
     ) where
 
-import           Control.Concurrent (ThreadId, myThreadId)
+import           Control.Concurrent (myThreadId)
 import           Control.Concurrent.MVar
 import qualified Control.Exception as Exception
 import           Control.Monad (forM_, void)
@@ -19,10 +18,10 @@ import           Control.Monad.Trans.Class (lift)
 import           Control.Monad.Trans.State (StateT(..))
 import           Data.Foldable (traverse_)
 import           Data.IORef
-import           Data.List (partition)
 import           Data.Text (Text)
 import           Graphics.DrawingCombinators.Affine
 import           Graphics.DrawingCombinators.Color
+import           Graphics.DrawingCombinators.Cleanup (queueGlResourceCleanup)
 import           Graphics.FreetypeGL.Markup (Markup(..))
 import qualified Graphics.FreetypeGL.Markup as Markup
 import           Graphics.FreetypeGL.Shaders (TextShaderProgram(..), TextShaderUniforms(..))
@@ -48,25 +47,6 @@ data Font = Font
     { getLCDFont :: !FTGLFont
     , getScaledFont :: !FTGLFont
     }
-
-type CleanupAction = (ThreadId, IO ())
-
-{-# NOINLINE glResourceCleanupQueue #-}
-glResourceCleanupQueue :: IORef [CleanupAction]
-glResourceCleanupQueue = unsafePerformIO (newIORef [])
-
-cleanQueuedGlResources :: IO ()
-cleanQueuedGlResources =
-    do
-        tid <- myThreadId
-        Exception.mask_ $
-            atomicModifyIORef glResourceCleanupQueue (partition ((/= tid) . fst))
-            >>= mapM_ snd
-
-queueGlResourceCleanup :: ThreadId -> IO () -> IO ()
-queueGlResourceCleanup tid act =
-    atomicModifyIORef glResourceCleanupQueue $
-    \queue -> ((tid, act) : queue, ())
 
 -- | Load a TTF font from a file. This is CPS'd to take care of finalization
 newFTGLFont ::
