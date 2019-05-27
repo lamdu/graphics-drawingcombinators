@@ -83,6 +83,7 @@ where
 
 import qualified Codec.Image.STB as Image
 import           Control.Applicative (Applicative(..), liftA2, (<$>))
+import           Control.Concurrent.MVar
 import           Control.Monad (join, unless)
 import qualified Data.Bitmap.OpenGL as Bitmap
 import           Data.IORef (newIORef, atomicModifyIORef)
@@ -90,9 +91,9 @@ import           Data.Monoid (Monoid(..), Any(..))
 import           Data.Semigroup (Semigroup(..))
 import           Data.Text (Text)
 import           Graphics.DrawingCombinators.Affine
+import qualified Graphics.DrawingCombinators.Cleanup as Cleanup
 import           Graphics.DrawingCombinators.Color
 import           Graphics.DrawingCombinators.Text
-import           Graphics.DrawingCombinators.Cleanup (cleanQueuedGlResources)
 import           Graphics.FreetypeGL.Init (initFreetypeGL)
 import qualified Graphics.Rendering.OpenGL.GL as GL
 import           System.IO.Unsafe (unsafePerformIO)
@@ -150,7 +151,7 @@ maybeInitFreetypeGL =
 render :: Image a -> IO ()
 render d = GL.preservingAttrib [GL.AllServerAttributes] $ do
     maybeInitFreetypeGL
-    cleanQueuedGlResources
+    Cleanup.cleanQueuedGlResources
     GL.blend GL.$= GL.Enabled
     GL.blendFunc GL.$= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
     -- For now we assume the user wants antialiasing; the general solution is not clear - maybe let the
@@ -292,15 +293,31 @@ tint c d = Image render' (dPick d)
 -- | A Sprite represents a finite bitmap image.
 --
 -- > [[Sprite]] = [-1,1]^2 -> Color
-data Sprite = Sprite { spriteObject :: GL.TextureObject }
+newtype Sprite = Sprite { spriteObject :: IO GL.TextureObject }
+-- The IO action is to be invoked in a valid GL render context
 
 -- | Load an image from a file and create a sprite out of it.
 openSprite :: FilePath -> IO Sprite
 openSprite path = do
     e <- Image.loadImage path
+    mvar <- newMVar Nothing
+    let mkBitmapTexture bmp =
+            do
+                res <- Bitmap.makeSimpleBitmapTexture bmp
+                _ <- mkWeakMVar mvar $ Cleanup.queueGlResourceCleanup $
+                    GL.deleteObjectName res
+                return res
     case e of
         Left err -> fail err
-        Right bmp -> Sprite <$> Bitmap.makeSimpleBitmapTexture bmp
+        Right bmp ->
+            return $ Sprite $ do
+                modifyMVar mvar $ \m ->
+                    mvarModification <$>
+                    case m of
+                    Nothing -> mkBitmapTexture bmp
+                    Just x -> pure x
+    where
+        mvarModification x = (Just x, x)
 
 -- | The image of a sprite at the origin.
 --
@@ -312,7 +329,8 @@ sprite spr = Image render' pick
     render' tr _ = pure $ do
         GL.texture GL.Texture2D GL.$= GL.Enabled
         oldtex <- GL.get (GL.textureBinding GL.Texture2D)
-        GL.textureBinding GL.Texture2D GL.$= (Just $ spriteObject spr)
+        obj <- spriteObject spr
+        GL.textureBinding GL.Texture2D GL.$= Just obj
         GL.renderPrimitive GL.Quads $ do
             texcoord 0 0
             GL.vertex   $ toVertex tr (-1, 1)
