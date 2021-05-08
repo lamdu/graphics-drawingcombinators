@@ -82,13 +82,12 @@ module Graphics.DrawingCombinators
 where
 
 import qualified Codec.Image.STB as Image
-import           Control.Applicative (Applicative(..), liftA2, (<$>))
+import           Control.Applicative (Applicative(..), liftA2)
 import           Control.Concurrent.MVar
 import           Control.Monad (join, unless)
 import qualified Data.Bitmap.OpenGL as Bitmap
 import           Data.IORef (newIORef, atomicModifyIORef)
-import           Data.Monoid (Monoid(..), Any(..))
-import           Data.Semigroup (Semigroup(..))
+import           Data.Monoid (Any(..))
 import           Data.Text (Text)
 import           Graphics.DrawingCombinators.Affine
 import qualified Graphics.DrawingCombinators.Cleanup as Cleanup
