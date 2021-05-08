@@ -74,7 +74,7 @@ module Graphics.DrawingCombinators
     , TextAttrs(..), defTextAttrs
     , text
     , BoundingBox(..), textBoundingBox, textBoundingWidth
-    , textAdvance
+    , textAdvance, textPositions
     -- * Extensions
     , unsafeOpenGLImage
     , Monoid(..), Any(..)

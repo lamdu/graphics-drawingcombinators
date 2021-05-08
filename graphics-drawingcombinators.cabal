@@ -29,6 +29,7 @@ Library
                  , stb-image == 0.2.*
                  , text
                  , transformers >= 0.4.2.0
+                 , vector
     hs-Source-Dirs: src
     Exposed-Modules: Graphics.DrawingCombinators
                    , Graphics.DrawingCombinators.Color

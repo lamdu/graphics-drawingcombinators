@@ -4,7 +4,7 @@
 module Graphics.DrawingCombinators.Text
     ( Font, openFont, openFontNoLCD
     , fontAscender, fontDescender, fontHeight, fontLineGap
-    , textAdvance
+    , textAdvance, textPositions
     , BoundingBox(..), textBoundingBox, textBoundingWidth
     , renderText
     , TextAttrs(..), defTextAttrs
@@ -18,9 +18,13 @@ import           Control.Monad.Trans.State (StateT(..))
 import           Data.Foldable (traverse_)
 import           Data.IORef
 import           Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Vector.Unboxed.Mutable as Vector.Mutable
+import           Data.Vector.Unboxed (Vector)
+import qualified Data.Vector.Unboxed as Vector
 import           Graphics.DrawingCombinators.Affine
-import           Graphics.DrawingCombinators.Color
 import           Graphics.DrawingCombinators.Cleanup (queueGlResourceCleanup)
+import           Graphics.DrawingCombinators.Color
 import           Graphics.FreetypeGL.Markup (Markup(..))
 import qualified Graphics.FreetypeGL.Markup as Markup
 import           Graphics.FreetypeGL.Shaders (TextShaderProgram(..), TextShaderUniforms(..))
@@ -36,7 +40,7 @@ import qualified Graphics.Rendering.OpenGL.GL as GL
 import           System.IO.Unsafe (unsafePerformIO) -- for pure text metrics
 
 data FTGLFont = FTGLFont
-    { _getTextureFont :: !TextureFont
+    { getTextureFont :: !TextureFont
     , _getTextBuffer :: !(MVar TextBuffer)
     , getShaders :: IO [TextShaderProgram]
     , getAtlas :: !TextureAtlas
@@ -124,23 +128,27 @@ toMarkup tintColor (TextAttrs spc gma fgColor outline underLn overLn strikeThru)
             Markup.RGBA (realToFrac r) (realToFrac g) (realToFrac b) (realToFrac a)
         tint = toRGBA . modulate tintColor
 
+withTextBuffer ::
+    FTGLFont -> (TextBuffer -> StateT TextBuffer.Pen IO a) -> IO (a, TextBuffer.Pen)
+withTextBuffer (FTGLFont font mvarTextBuffer _ _) act =
+    withMVar mvarTextBuffer $ \textBuffer -> do
+        h <- TextureFont.height font
+        d <- TextureFont.descender font
+        runStateT (act textBuffer) (TextBuffer.Pen 0 (h + d))
+
 withTextBufferStr ::
     FTGLFont -> Markup -> Text ->
     (TextBuffer -> StateT TextBuffer.Pen IO a) ->
     IO (a, TextBuffer.Pen)
-withTextBufferStr (FTGLFont font mvarTextBuffer _ _) markup str act =
-    str `seq` withMVar mvarTextBuffer $ \textBuffer -> do
-        h <- TextureFont.height font
-        d <- TextureFont.descender font
-        TextBuffer.clear textBuffer
-        (`runStateT` TextBuffer.Pen 0 (h + d)) $
-            do
-                TextBuffer.addText textBuffer markup font str
-                act textBuffer
+withTextBufferStr font markup !str act =
+    withTextBuffer font $ \textBuffer -> do
+        lift $ TextBuffer.clear textBuffer
+        TextBuffer.addText textBuffer markup (getTextureFont font) str
+        act textBuffer
 
 textMetric :: (TextureFont -> IO Float) -> Font -> R
 textMetric f (Font lcdFont _) =
-    realToFrac . unsafePerformIO . f $ _getTextureFont lcdFont
+    realToFrac . unsafePerformIO . f $ getTextureFont lcdFont
 
 fontHeight :: Font -> R
 fontHeight = textMetric TextureFont.height
@@ -245,3 +253,29 @@ textAdvance (Font font _) str =
         ((), TextBuffer.Pen advanceX _advanceY) <-
             withTextBufferStr font Markup.def str $ \_ -> return ()
         return advanceX
+
+-- | @textPositions font str@ is the x-advances of the text, after each char in the given text
+textPositions :: Font -> Text -> Vector R
+textPositions (Font font _) !str =
+    unsafePerformIO $
+    do
+        pos <- Vector.Mutable.new (Text.length str)
+
+        let go _  _     Nothing  []     = pure ()
+            go !i !xpos Just{}   []     = do
+                Vector.Mutable.write pos i xpos
+            go !i !xpos (Just p) (c:cs) =
+                do
+                    g <- TextureFont.glyph c textureFont
+                    kerning <- realToFrac <$> TextureFont.glyphKerning p g
+                    advanceX <- realToFrac <$> TextureFont.glyphAdvanceX g
+                    Vector.Mutable.write pos i (xpos+kerning)
+                    go (i+1) (xpos+kerning + advanceX) (Just c) cs
+            go !i !xpos Nothing  (c:cs) =
+                do
+                    advanceX <- TextureFont.glyph c textureFont >>= TextureFont.glyphAdvanceX
+                    go (i+1) (xpos + realToFrac advanceX) (Just c) cs
+        go (-1) 0 Nothing (Text.unpack str)
+        Vector.unsafeFreeze pos
+    where
+        textureFont = getTextureFont font
