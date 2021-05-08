@@ -4,3 +4,4 @@
 /ghci-out
 *.i_hi
 *.i_o
+/stack.yaml.lock
