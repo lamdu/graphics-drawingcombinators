@@ -2,7 +2,6 @@
 
 module Graphics.DrawingCombinators.Color (Color(..), white, modulate) where
 
-import Data.Semigroup (Semigroup(..))
 import Graphics.DrawingCombinators.Affine
 
 -- | Color is defined in the usual computer graphics sense:

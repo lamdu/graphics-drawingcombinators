@@ -16,7 +16,6 @@ module Graphics.DrawingCombinators.Affine
     )
 where
 
-import           Data.Semigroup (Semigroup(..))
 import qualified Graphics.Rendering.OpenGL.GL as GL
 
 type R = GL.GLdouble
